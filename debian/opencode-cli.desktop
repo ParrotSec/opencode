@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=OpenCode CLI
+GenericName=AI Coding Agent Terminal Interface
+Comment=Open source AI coding agent terminal interface
+Exec=opencode
+TryExec=opencode
+Icon=opencode
+Terminal=true
+Categories=Development;Utility;
+Keywords=AI;Coding;Agent;CLI;Terminal;
+StartupNotify=false

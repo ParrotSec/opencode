@@ -1,0 +1,80 @@
+opencode (1.18.21-0parrot7) echo; urgency=medium
+
+  * Install two independent application-menu launchers: OpenCode Web starts
+    `opencode web` in a terminal for browser access and server monitoring;
+    OpenCode CLI starts the interactive terminal UI with `opencode`.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 24 Aug 2026 09:00:00 +0200
+
+opencode (1.18.21-0parrot6) echo; urgency=medium
+
+  * Run the `opencode web` desktop launcher in a terminal so users can
+    monitor server output and stop the backend cleanly with Ctrl+C.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 24 Aug 2026 08:30:00 +0200
+
+opencode (1.18.21-0parrot5) echo; urgency=medium
+
+  * Build and embed the OpenCode web UI instead of passing
+    --skip-embed-web-ui.
+  * Make the desktop launcher run `opencode web` without opening a terminal;
+    add desktop actions for the terminal TUI and continuing the latest
+    session. The /usr/bin/opencode terminal command remains unchanged.
+  * Depend on xdg-utils so `opencode web` can reliably open the default
+    browser from the desktop launcher.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 24 Aug 2026 08:00:00 +0200
+
+opencode (1.18.21-0parrot4) echo; urgency=medium
+
+  * Do not run dh_strip or dh_dwz on the Bun standalone executable. These
+    tools remove or rewrite Bun's appended module graph, leaving a plain Bun
+    runtime that prints Bun's generic help instead of starting OpenCode.
+  * Install /usr/bin/opencode as a wrapper which clears an inherited
+    BUN_BE_BUN value before executing the standalone application.
+  * Smoke-test the final staged executable during the dh_strip sequence.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 24 Aug 2026 05:00:00 +0200
+
+opencode (1.18.21-0parrot3) echo; urgency=medium
+
+  * Install the compiled CLI at /usr/lib/opencode/opencode and provide the
+    /usr/bin/opencode command. The previous dh_install destination contained
+    an erroneous extra "opencode/" prefix.
+  * Add a terminal desktop launcher and upstream application icon.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 24 Aug 2026 04:26:24 +0200
+
+
+opencode (1.18.21-0parrot2) echo; urgency=medium
+
+  * No Node.js relationship: opencode runs entirely on its embedded Bun
+    runtime and does not need Node.js. (Optional Node-based LSP servers and
+    the npm plugin/upgrade path use a system node if the user happens to have
+    one, but the package neither needs nor references one.)
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 24 Aug 2026 00:45:00 +0200
+
+opencode (1.18.21-0parrot1) echo; urgency=medium
+
+  * Initial Debian packaging of opencode (opencode.ai) v1.18.21.
+  * Build from the upstream source tarball with the Bun toolchain.
+    opencode is a Bun-native application: the CLI is produced by
+    `bun build --compile` as a self-contained binary (Bun runtime and all
+    JS dependencies embedded), so the package has no Node.js runtime
+    dependency.
+  * Bun is not packaged in Debian, so the Bun toolchain is downloaded from
+    the network at build time (pinned to the version required by upstream's
+    packageManager field, bun@1.3.14).
+  * npm dependencies are installed at build time with `bun install`, pinned
+    by the upstream bun.lock; the models.dev provider catalog used for code
+    generation is fetched from the network as well. The build therefore
+    requires a network-enabled build worker and will not run offline.
+  * The build targets the build host's architecture only (--single) and runs
+    upstream's smoke test (opencode --version). The optional embedded web UI
+    is not included; the TUI, headless server and CLI are fully functional.
+  * Redirect HOME to a writable dir inside the build tree
+    (debian/fakehome) so bun's install cache/tmp work under sbuild, which
+    sets HOME=/sbuild-nonexistent (fixes EACCES "mkdir /sbuild-nonexistent").
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Sun, 23 Aug 2026 22:40:00 +0200

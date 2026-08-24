@@ -1,0 +1,5 @@
+#!/bin/sh
+# BUN_BE_BUN makes a Bun standalone executable ignore its embedded application
+# and act as the Bun CLI. Do not let a user/session-level value break OpenCode.
+unset BUN_BE_BUN
+exec /usr/lib/opencode/opencode "$@"

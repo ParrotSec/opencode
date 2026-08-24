@@ -1,0 +1,9 @@
+# The Bun toolchain is downloaded into debian/.bun-toolchain at build time;
+# never let dpkg-source mistake it for source content if the tree is dirty.
+extend-diff-ignore = "(^|/)debian/\.bun-toolchain(/|$)"
+tar-ignore = "debian/.bun-toolchain"
+tar-ignore = "node_modules"
+tar-ignore = "dist"
+# sbuild HOME redirect scratch dir (created during build).
+extend-diff-ignore = "(^|/)debian/fakehome(/|$)"
+tar-ignore = "debian/fakehome"

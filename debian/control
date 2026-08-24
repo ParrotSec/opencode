@@ -1,0 +1,35 @@
+Source: opencode
+Section: utils
+Priority: optional
+Maintainer: Parrot Security <team@parrotsec.org>
+Build-Depends: debhelper-compat (= 13), curl, ca-certificates, unzip
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://opencode.ai
+Vcs-Browser: https://github.com/anomalyco/opencode
+Vcs-Git: https://github.com/anomalyco/opencode.git
+
+Package: opencode
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends}, xdg-utils
+Suggests: git
+Description: open source AI coding agent for the terminal
+ opencode is an open-source AI coding agent. It provides an interactive
+ terminal UI (TUI), a headless server, and a scriptable CLI that can read,
+ edit and run code, manage sessions, and talk to many LLM providers
+ (OpenAI, Anthropic, Google, Bedrock, OpenRouter, ...).
+ .
+ The program is built with the Bun toolchain and is shipped as a
+ self-contained compiled binary (the Bun runtime and all JavaScript
+ dependencies are embedded), so it has no Node.js runtime dependency.
+ .
+ The package includes the embedded web UI. The desktop launcher starts
+ `opencode web`, which runs the local server and opens the browser. The
+ interactive terminal UI and all other commands remain available by running
+ `opencode` from a terminal.
+ .
+ Build note: opencode is built from source with Bun (not packaged in
+ Debian). The Bun toolchain, the npm dependencies (pinned by the upstream
+ bun.lock) and the models.dev provider catalog used during code generation
+ are all fetched from the network at build time, so the build requires a
+ network-enabled build worker and will not run on an offline buildd.

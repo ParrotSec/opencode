@@ -1,0 +1,18 @@
+version=4
+
+# Track upstream opencode releases (GitHub: anomalyco/opencode).
+#
+# The version list is read from the tags page and the matching source archive
+# (the auto-generated tag tarball) is downloaded. opencode fetches its
+# models.dev provider catalog and npm dependencies at build time, so the plain
+# source archive is sufficient (there is no separate "source + data" artifact
+# like pi's).
+#
+# In the mangle the version is captured with (…) and re-inserted with $1.
+
+opts="\
+filenamemangle=s%.*/v?@ANY_VERSION@\.tar\.gz%opencode-@VERSION@.tar.gz%,\
+downloadurlmangle=s%^.*/archive/refs/tags/v?(\d+\.\d+\.\d+)\.tar\.gz$%https://github.com/anomalyco/opencode/archive/refs/tags/v$1.tar.gz%\
+" \
+  https://github.com/anomalyco/opencode/tags \
+  .*/archive/refs/tags/v?@ANY_VERSION@\.tar\.gz

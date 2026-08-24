@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=OpenCode Web
+GenericName=AI Coding Agent Web Interface
+Comment=Open source AI coding agent web interface
+Exec=opencode web
+TryExec=opencode
+Icon=opencode
+Terminal=true
+Categories=Development;Utility;
+Keywords=AI;Coding;Agent;Web;Browser;
+StartupNotify=false
