@@ -1,4 +1,4 @@
-import { Location } from "@opencode-ai/schema/location"
+import { Location } from "@opencode/schema/location"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 
@@ -26,17 +26,19 @@ export const locationQueryOpenApi = OpenApi.annotations({
   },
 })
 
-export const LocationGroup = HttpApiGroup.make("server.location").add(
-  HttpApiEndpoint.get("location.get", "/api/location", {
-    query: LocationQuery,
-    success: Location.Info,
-  })
-    .annotateMerge(locationQueryOpenApi)
-    .annotateMerge(
-      OpenApi.annotations({
-        identifier: "v2.location.get",
-        summary: "Get location",
-        description: "Resolve the requested location or the server default location.",
-      }),
-    ),
-)
+export const LocationGroup = HttpApiGroup.make("server.location")
+  .add(
+    HttpApiEndpoint.get("location.get", "/api/location", {
+      query: LocationQuery,
+      success: Location.Info,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.location.get",
+          summary: "Get location",
+          description: "Resolve the requested location or the server default location.",
+        }),
+      ),
+  )
+  .annotateMerge(OpenApi.annotations({ title: "location" }))

@@ -1,15 +1,10 @@
-import { Effect } from "effect"
-import { define } from "../internal"
+import { createProviderPlugin } from "./factory.js"
 
-export const AlibabaPlugin = define({
-  id: "alibaba",
-  effect: Effect.fn(function* (ctx) {
-    yield* ctx.aisdk.sdk(
-      Effect.fn(function* (evt) {
-        if (evt.package !== "@ai-sdk/alibaba") return
-        const mod = yield* Effect.promise(() => import("@ai-sdk/alibaba"))
-        evt.sdk = mod.createAlibaba(evt.options)
-      }),
-    )
-  }),
+export const AlibabaPlugin = createProviderPlugin({
+  id: "opencode.provider.alibaba",
+  package: "@ai-sdk/alibaba",
+  load: async (options) => {
+    const { createAlibaba } = await import("@ai-sdk/alibaba")
+    return createAlibaba(options)
+  },
 })

@@ -137,8 +137,6 @@ export const dict = {
   "ui.tool.websearch.provider": "{{provider}} Web-Suche",
   "ui.tool.shell": "Shell",
   "ui.tool.patch": "Patch",
-  "ui.tool.todos": "Aufgaben",
-  "ui.tool.todos.read": "Aufgaben lesen",
   "ui.tool.questions": "Fragen",
   "ui.tool.questions.numbered": "Fragen {{number}}",
   "ui.tool.agent": "{{type}}-Agent",

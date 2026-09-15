@@ -1,10 +1,13 @@
-import { Location } from "@opencode-ai/core/location"
-import { LocationServiceMap } from "@opencode-ai/core/location-services"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { WorkspaceV2 } from "@opencode-ai/core/workspace"
-import { Effect, Layer } from "effect"
+import { Location } from "@opencode/core/location"
+import { LocationServiceMap } from "@opencode/core/location-services"
+import { AbsolutePath } from "@opencode/core/schema"
+import { Session } from "@opencode/core/session"
+import { Workspace } from "@opencode/core/workspace"
+import { InvalidRequestError } from "@opencode/protocol/errors"
+import { Effect, Layer, Schema } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
+import { missingSession } from "./handlers/session-error"
 
 export type LocationServices = Layer.Success<ReturnType<(typeof LocationServiceMap.Service)["get"]>>
 
@@ -26,7 +29,16 @@ export function response<A, E, R>(data: Effect.Effect<A, E, R>) {
   })
 }
 
-function ref(request: HttpServerRequest.HttpServerRequest): Location.Ref {
+const decodeSessionID = Schema.decodeUnknownEffect(Session.ID)
+
+export const sessionInfo = Effect.fnUntraced(function* (sessions: Session.Interface, sessionID: unknown) {
+  const id = yield* decodeSessionID(sessionID).pipe(
+    Effect.mapError(() => new InvalidRequestError({ message: "Invalid session ID", field: "sessionID" })),
+  )
+  return yield* sessions.get(id).pipe(Effect.catchTag("Session.NotFoundError", missingSession))
+})
+
+export function requestRef(request: HttpServerRequest.HttpServerRequest): Location.Ref {
   const query = new URL(request.url, "http://localhost").searchParams
   const workspaceID = query.get("location[workspace]") || request.headers["x-opencode-workspace"]
   const directory =
@@ -34,7 +46,7 @@ function ref(request: HttpServerRequest.HttpServerRequest): Location.Ref {
     (request.headers["x-opencode-directory"] ? decode(request.headers["x-opencode-directory"]) : process.cwd())
   return Location.Ref.make({
     directory: AbsolutePath.make(directory),
-    workspaceID: workspaceID ? WorkspaceV2.ID.make(workspaceID) : undefined,
+    workspaceID: workspaceID ? Workspace.ID.make(workspaceID) : undefined,
   })
 }
 
@@ -53,7 +65,7 @@ export const layer = Layer.effect(
     return LocationMiddleware.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
-        return yield* effect.pipe(Effect.provide(locations.get(ref(request))))
+        return yield* effect.pipe(Effect.provide(locations.get(requestRef(request))))
       }),
     )
   }),

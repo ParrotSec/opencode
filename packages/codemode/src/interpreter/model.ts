@@ -1,26 +1,9 @@
-import type { SafeObject } from "../tool-runtime.js"
-import type { SandboxURL } from "../values.js"
+import type { Node } from "acorn"
+import type { ErrorType } from "./intrinsics.js"
+import type { DiagnosticKind } from "../codemode.js"
 
-export type SourcePosition = {
-  line: number
-  column: number
-}
-
-export type SourceLocation = {
-  start: SourcePosition
-  end: SourcePosition
-}
-
-export type AstNode = {
-  type: string
-  loc?: SourceLocation
-  [key: string]: unknown
-}
-
-export type ProgramNode = AstNode & {
-  type: "Program"
-  body: Array<AstNode>
-}
+/** Any parsed node; the interpreter narrows on `type` and reads `loc` for diagnostics. */
+export type AstNode = Node
 
 export type Binding = {
   mutable: boolean
@@ -30,164 +13,72 @@ export type Binding = {
 
 export type StatementResult =
   | { kind: "none" }
-  | { kind: "value"; value: unknown }
   | { kind: "return"; value: unknown }
-  | { kind: "break" }
-  | { kind: "continue" }
+  | { kind: "break"; label?: string }
+  | { kind: "continue"; label?: string }
 
-export type MemberReference = {
-  target: SafeObject | Array<unknown> | SandboxURL
-  key: string | number
-}
+export type GeneratorRequestKind = "next" | "return" | "throw"
 
-export class CodeModeFunction {
-  constructor(
-    readonly parameters: ReadonlyArray<AstNode>,
-    readonly body: AstNode,
-    readonly capturedScopes: ReadonlyArray<Map<string, Binding>>,
-  ) {}
-}
-
-export class IntrinsicReference {
-  constructor(
-    readonly receiver: unknown,
-    readonly name: string,
-  ) {}
-}
-
-export class ComputedValue {
-  constructor(readonly value: unknown) {}
-}
-
-export class PromiseNamespace {}
-
-export type PromiseMethodName = "all" | "allSettled" | "race" | "resolve" | "reject"
-
-export class PromiseMethodReference {
-  constructor(readonly name: PromiseMethodName) {}
-}
-
-export type GlobalNamespaceName =
-  | "Object"
-  | "Math"
-  | "JSON"
-  | "Array"
-  | "console"
-  | "Date"
-  | "RegExp"
-  | "Map"
-  | "Set"
-  | "URL"
-  | "URLSearchParams"
-
-export class GlobalNamespace {
-  constructor(readonly name: GlobalNamespaceName) {}
-}
-
-export class GlobalMethodReference {
-  constructor(
-    readonly namespace: GlobalNamespaceName | "Number" | "String",
-    readonly name: string,
-  ) {}
-}
-
-export class CoercionFunction {
-  constructor(readonly name: "Number" | "String" | "Boolean" | "parseInt" | "parseFloat") {}
-}
-
-export class UriFunction {
-  constructor(readonly name: "encodeURI" | "encodeURIComponent" | "decodeURI" | "decodeURIComponent") {}
-}
+export const AsyncIteratorSymbol: unique symbol = Symbol("codemode.async-iterator")
+export const IteratorSymbol: unique symbol = Symbol("codemode.iterator")
+export const IteratorSymbols = [AsyncIteratorSymbol, IteratorSymbol] as const
 
 export class ProgramThrow {
   constructor(readonly value: unknown) {}
 }
 
-export class ErrorConstructorReference {
-  constructor(readonly name: string) {}
+export class GeneratorReturn {
+  constructor(readonly value: unknown) {}
 }
-
-export type DiagnosticKind =
-  | "ParseError"
-  | "UnsupportedSyntax"
-  | "UnknownTool"
-  | "InvalidToolInput"
-  | "InvalidToolOutput"
-  | "InvalidDataValue"
-  | "ToolCallLimitExceeded"
-  | "TimeoutExceeded"
-  | "ToolFailure"
-  | "ExecutionFailure"
 
 export const OptionalShortCircuit: unique symbol = Symbol("codemode.optional-short-circuit")
 
-export const supportedSyntaxMessage =
-  "Supported orchestration syntax: tools.* calls (they return promises - resolve them with await), data literals, destructuring, optional chaining, template literals, conditionals, switch, loops (incl. for...of and for...in over object/array/tools keys), arrow functions, spread, try/catch, array methods (map/filter/find/findIndex/some/every/reduce/flatMap/forEach/sort/slice/concat/indexOf/lastIndexOf/at/flat/reverse/includes/join), string methods (incl. match/matchAll/replace/split with regular expressions), Date/RegExp/Map/Set/URL/URLSearchParams, URI encoding helpers, Object/Math/JSON helpers, captured console.log/warn/error/dir/table, and Promise.all/allSettled/race/resolve/reject over arrays mixing promises and plain values for parallel tool calls (promise chaining with .then/.catch is not supported - use await with try/catch)."
-
 export class InterpreterRuntimeError extends Error {
   readonly node?: AstNode
-  errorName: string = "Error"
 
   constructor(
     message: string,
     node?: AstNode,
     readonly kind: DiagnosticKind = "ExecutionFailure",
     readonly suggestions?: ReadonlyArray<string>,
+    /** The JS error class a program sees when it catches this failure. */
+    readonly type: ErrorType = "TypeError",
   ) {
     super(message)
     this.name = "InterpreterRuntimeError"
     if (node) this.node = node
   }
-
-  as(errorName: string): this {
-    this.errorName = errorName
-    return this
-  }
 }
+
+/** Attaches a source location to a failure raised where none was known, such as inside a property accessor. */
+export const locate = (error: unknown, node: AstNode): unknown =>
+  error instanceof InterpreterRuntimeError && error.node === undefined
+    ? new InterpreterRuntimeError(error.message, node, error.kind, error.suggestions, error.type)
+    : error
+
+const failure = (type: ErrorType) => (message: string, node?: AstNode) =>
+  new InterpreterRuntimeError(message, node, "ExecutionFailure", undefined, type)
+
+export const rangeError = failure("RangeError")
+export const referenceError = failure("ReferenceError")
+export const syntaxError = failure("SyntaxError")
+export const uriError = failure("URIError")
+
+// Orient the agent rather than enumerate JavaScript; interpreter-support.md is the full matrix.
+export const supportedSyntaxMessage =
+  "This is a restricted JavaScript-like language. Supported: plain and async functions, data literals, destructuring, standard control flow, await and Promise, and built-ins such as Array, Object, Math, JSON, Date, RegExp, Map, Set, and URL. Unsupported: classes, this, getters/setters, tagged templates, BigInt, and custom Symbols. Use plain functions and data objects instead."
 
 export const unsupportedSyntax = (kind: string, node: AstNode): InterpreterRuntimeError =>
   new InterpreterRuntimeError(
-    `Syntax '${kind}' is not supported in CodeMode. ${supportedSyntaxMessage}`,
+    `Syntax '${kind}' is not supported. ${supportedSyntaxMessage}`,
     node,
     "UnsupportedSyntax",
     [supportedSyntaxMessage],
+    "SyntaxError",
   )
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
-
-export const asNode = (value: unknown, context: string): AstNode => {
-  if (!isRecord(value) || typeof value.type !== "string") {
-    throw new InterpreterRuntimeError(`Invalid AST node while reading ${context}.`)
-  }
-  return value as AstNode
-}
-
-export const getArray = (node: AstNode, key: string): Array<unknown> => {
-  const value = node[key]
-  if (!Array.isArray(value)) throw new InterpreterRuntimeError(`Expected '${key}' to be an array.`, node)
-  return value
-}
-
-export const getString = (node: AstNode, key: string): string => {
-  const value = node[key]
-  if (typeof value !== "string") throw new InterpreterRuntimeError(`Expected '${key}' to be a string.`, node)
-  return value
-}
-
-export const getBoolean = (node: AstNode, key: string): boolean => {
-  const value = node[key]
-  if (typeof value !== "boolean") throw new InterpreterRuntimeError(`Expected '${key}' to be a boolean.`, node)
-  return value
-}
-
-export const getOptionalNode = (node: AstNode, key: string): AstNode | undefined => {
-  const value = node[key]
-  if (value === undefined || value === null) return undefined
-  return asNode(value, key)
-}
-
-export const getNode = (node: AstNode, key: string): AstNode => asNode(node[key], key)
 
 export const sourceLocation = (node: AstNode): { readonly line: number; readonly column: number } => ({
   line: Math.max(1, (node.loc?.start.line ?? 2) - 1),

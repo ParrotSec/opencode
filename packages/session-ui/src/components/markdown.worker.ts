@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 
 import { ShikiStreamTokenizer } from "@shikijs/stream"
-import { createMarkdownParser } from "@opencode-ai/ui/context/marked-parser"
-import { OpenCodeTheme } from "@opencode-ai/ui/context/marked-theme"
+import { createMarkdownParser } from "@opencode/ui/context/marked-parser"
+import { OpenCodeTheme } from "@opencode/ui/context/marked-theme"
 import {
   bundledLanguages,
   createHighlighter,
@@ -39,7 +39,9 @@ const parser = createMarkdownParser(async (code, language) => {
   const name = language in bundledLanguages ? language : "text"
   if (!instance.getLoadedLanguages().includes(name))
     await instance.loadLanguage(bundledLanguages[name as BundledLanguage])
-  return instance.codeToHtml(code, { lang: name as BundledLanguage, theme: "OpenCode", tabindex: false })
+  return instance
+    .codeToHtml(code, { lang: name as BundledLanguage, theme: "OpenCode", tabindex: false })
+    .replace("<code>", `<code class="language-${name}">`)
 })
 
 self.onmessage = (event: MessageEvent<MarkdownWorkerRequest>) => {

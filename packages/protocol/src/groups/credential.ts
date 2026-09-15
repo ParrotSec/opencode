@@ -1,7 +1,7 @@
-import { Credential } from "@opencode-ai/schema/credential"
+import { Credential } from "@opencode/schema/credential"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
-import { LocationQuery, locationQueryOpenApi } from "./location"
+import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 export const CredentialGroup = HttpApiGroup.make("server.credential")
   .add(
@@ -17,6 +17,22 @@ export const CredentialGroup = HttpApiGroup.make("server.credential")
           identifier: "v2.credential.update",
           summary: "Update credential",
           description: "Update a stored credential label.",
+        }),
+      ),
+  )
+  .annotateMerge(OpenApi.annotations({ title: "credential" }))
+  .add(
+    HttpApiEndpoint.post("credential.activate", "/api/credential/:credentialID/activate", {
+      params: { credentialID: Credential.ID },
+      query: LocationQuery,
+      success: HttpApiSchema.NoContent,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.credential.activate",
+          summary: "Activate credential",
+          description: "Activate a stored integration credential.",
         }),
       ),
   )

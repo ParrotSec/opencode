@@ -2,39 +2,65 @@ import { expect, test } from "bun:test"
 import { mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import type { TerminalColors } from "@opentui/core"
-import { DEFAULT_THEMES, addTheme, allThemes, hasTheme, resolveTheme, terminalMode } from "../src/theme"
-import { discoverThemes } from "../src/context/theme"
+import { DEFAULT_THEMES, hasTheme, parseTheme, resolveTheme } from "../src/theme"
+import { discoverThemes } from "../src/theme/discovery"
+import { configDirectories } from "../src/util/config-directories"
+import { terminalMode } from "../src/theme/system"
 import { tmpdir } from "./fixture/fixture"
 
-test("addTheme writes into module theme store", () => {
-  const name = `plugin-theme-${Date.now()}`
-  expect(addTheme(name, DEFAULT_THEMES.opencode)).toBe(true)
-  expect(allThemes()[name]).toBeDefined()
+test("parseTheme delegates malformed V1 sources and rejects unknown versions", () => {
+  expect(() => parseTheme({})).toThrow()
+  expect(() => parseTheme({ version: 3 })).toThrow("Unsupported theme version: 3")
 })
 
-test("addTheme keeps first theme for duplicate names", () => {
-  const name = `plugin-theme-keep-${Date.now()}`
-  const one = structuredClone(DEFAULT_THEMES.opencode)
-  const two = structuredClone(DEFAULT_THEMES.opencode)
-  one.theme.primary = "#101010"
-  two.theme.primary = "#fefefe"
+test("parses unversioned and explicit V1 themes lazily once", () => {
+  const unversioned = structuredClone(DEFAULT_THEMES.opencode)
+  const explicit = { ...structuredClone(DEFAULT_THEMES.opencode), version: 1 }
+  const first = parseTheme(unversioned, "unversioned")
+  const second = parseTheme(explicit, "explicit")
 
-  expect(addTheme(name, one)).toBe(true)
-  expect(addTheme(name, two)).toBe(false)
-  expect(allThemes()[name]!.theme.primary).toBe("#101010")
+  expect(first.version).toBe(2)
+  expect(second.version).toBe(2)
+  expect(parseTheme(unversioned, "unversioned")).toBe(first)
+  expect(parseTheme(explicit, "explicit")).toBe(second)
 })
 
-test("addTheme ignores entries without a theme object", () => {
-  const name = `plugin-theme-invalid-${Date.now()}`
-  expect(addTheme(name, { defs: { a: "#ffffff" } })).toBe(false)
-  expect(allThemes()[name]).toBeUndefined()
+test("decodes native V2 themes lazily once", () => {
+  const source = { version: 2, light: { categorical: ["red"] } } as const
+
+  const document = parseTheme(source)
+  expect(document.light?.categorical).toEqual(["red"])
+  expect(parseTheme(source)).toBe(document)
+})
+
+test("rejects invalid V2 themes when parsing", () => {
+  expect(() => parseTheme({ version: 2, light: { categorical: [] } }, "invalid-v2")).toThrow(
+    "Invalid theme: invalid-v2",
+  )
+})
+
+test("rejects invalid V1 themes when parsing", () => {
+  const source = structuredClone(DEFAULT_THEMES.opencode)
+  source.defs = { ...source.defs, one: "two", two: "one" }
+  source.theme.primary = "one"
+
+  expect(() => parseTheme(source)).toThrow("Circular color reference")
+})
+
+test("replacement sources receive independent parse caches", () => {
+  const first = structuredClone(DEFAULT_THEMES.opencode)
+  const second = structuredClone(DEFAULT_THEMES.opencode)
+  second.theme.primary = "#123456"
+
+  const previous = parseTheme(first)
+  const next = parseTheme(second)
+  expect(next).not.toBe(previous)
+  expect(parseTheme(second)).toBe(next)
 })
 
 test("hasTheme checks theme presence", () => {
-  const name = `plugin-theme-has-${Date.now()}`
-  expect(hasTheme(name)).toBe(false)
-  expect(addTheme(name, DEFAULT_THEMES.opencode)).toBe(true)
-  expect(hasTheme(name)).toBe(true)
+  expect(hasTheme("missing-theme")).toBe(false)
+  expect(hasTheme("opencode")).toBe(true)
 })
 
 test("resolveTheme rejects circular color refs", () => {
@@ -42,6 +68,17 @@ test("resolveTheme rejects circular color refs", () => {
   item.defs = { ...item.defs, one: "two", two: "one" }
   item.theme.primary = "one"
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
+})
+
+test("resolveTheme preserves full theme numeric color and marker semantics", () => {
+  const item = structuredClone(DEFAULT_THEMES.opencode)
+  item.theme.primary = 6
+  delete item.theme.selectedListItemText
+
+  const theme = resolveTheme(item, "dark")
+  expect(theme.primary.intent).toBe("rgb")
+  expect(theme.selectedListItemText).toBe(theme.background)
+  expect(theme._hasSelectedListItemText).toBe(false)
 })
 
 function terminalColors(defaultBackground: string | null, palette: Array<string | null> = []): TerminalColors {
@@ -78,4 +115,19 @@ test("custom theme precedence follows directory order", async () => {
   await writeFile(path.join(project, "themes", "custom.json"), JSON.stringify({ source: "project" }))
 
   await expect(discoverThemes([global, project])).resolves.toEqual({ custom: { source: "project" } })
+})
+
+test("theme directories include global config before project directories", async () => {
+  await using tmp = await tmpdir()
+  const global = path.join(tmp.path, "global")
+  const project = path.join(tmp.path, "repo", "package")
+  await mkdir(path.join(global, "themes"), { recursive: true })
+  await mkdir(path.join(project, ".opencode", "themes"), { recursive: true })
+  await writeFile(path.join(global, "themes", "global.json"), JSON.stringify({ source: "global" }))
+  await writeFile(path.join(project, ".opencode", "themes", "project.json"), JSON.stringify({ source: "project" }))
+
+  await expect(discoverThemes(configDirectories(global, project))).resolves.toEqual({
+    global: { source: "global" },
+    project: { source: "project" },
+  })
 })

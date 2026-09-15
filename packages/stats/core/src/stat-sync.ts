@@ -1,12 +1,12 @@
 import { DateTime, Effect } from "effect"
 import { Resource } from "sst/resource"
+import { Athena, AthenaQueryError, AthenaQueryTimeoutError } from "./athena"
 import { DatabaseError } from "./database"
 import { GeoStatRepo, rowsFromAggregates as geoRowsFromAggregates } from "./domain/geo"
-import { buildStatsQueries, toGeoAggregate, toModelAggregate, toProviderAggregate } from "./domain/inference"
+import { buildStatsQuery, toGeoAggregate, toModelAggregate, toProviderAggregate } from "./domain/inference"
 import { ModelStatRepo, rowsFromAggregates as modelRowsFromAggregates } from "./domain/model"
 import { ProviderStatRepo, rowsFromAggregates as providerRowsFromAggregates } from "./domain/provider"
 import { startOfIsoWeek } from "./domain/stat"
-import { R2Sql, R2SqlQueryError } from "./r2-sql"
 
 const DATALAKE_INGESTION_LAG_MS = 5 * 60_000
 const STATS_DATA_START_MS = new Date("2026-05-28T00:00:00.000Z").getTime()
@@ -18,25 +18,23 @@ const DISPLAY_WINDOW_MS = 56 * 86_400_000
 const INCREMENTAL_LOOKBACK_MS = 2 * 3_600_000
 
 export type SyncStatsResult = { ok: true; rows: number; startedAt: string; periodStart: string; periodEnd: string }
-export type SyncStatsError = R2SqlQueryError | DatabaseError
+export type SyncStatsError = AthenaQueryError | AthenaQueryTimeoutError | DatabaseError
 
 export const syncStats: (options?: {
   full?: boolean
-}) => Effect.Effect<SyncStatsResult, SyncStatsError, R2Sql | ModelStatRepo | ProviderStatRepo | GeoStatRepo> =
+}) => Effect.Effect<SyncStatsResult, SyncStatsError, Athena | ModelStatRepo | ProviderStatRepo | GeoStatRepo> =
   Effect.fn("StatSync.sync")(function* (options?: { full?: boolean }) {
     const startedAt = yield* DateTime.nowAsDate
     const periodEnd = new Date(Math.floor((startedAt.getTime() - DATALAKE_INGESTION_LAG_MS) / 60_000) * 60_000)
     const periodStart = options?.full ? fullPeriodStart(periodEnd) : incrementalPeriodStart(periodEnd)
-    const r2Sql = yield* R2Sql
+    const athena = yield* Athena
     const modelStats = yield* ModelStatRepo
     const providerStats = yield* ProviderStatRepo
     const geoStats = yield* GeoStatRepo
 
     yield* logRuntimeCheck()
 
-    const rows = yield* Effect.forEach(buildStatsQueries(periodStart, periodEnd), r2Sql.query, {
-      concurrency: 4,
-    }).pipe(Effect.map((batches) => batches.flat()))
+    const rows = yield* athena.query(buildStatsQuery(periodStart, periodEnd))
     const modelRows = modelRowsFromAggregates(rows.filter((row) => row.dimension === "model").flatMap(toModelAggregate))
     const providerRows = providerRowsFromAggregates(
       rows.filter((row) => row.dimension === "provider").flatMap(toProviderAggregate),
@@ -79,7 +77,7 @@ export const syncStats: (options?: {
     }
   })
 
-// May 27 was partial, so keep stats anchored at the first complete day.
+// May 27 was partial, so keep Athena stats anchored at the first complete day.
 function fullPeriodStart(periodEnd: Date) {
   return new Date(
     Math.max(
@@ -101,12 +99,13 @@ function incrementalPeriodStart(periodEnd: Date) {
 
 function logRuntimeCheck() {
   return Effect.logInfo(
-    `r2 sql stats runtime check ${JSON.stringify({
-      accountId: Resource.R2Sql.accountId,
-      bucket: Resource.R2Sql.bucket,
+    `athena stats runtime check ${JSON.stringify({
+      catalog: Resource.InferenceEvent.catalog,
+      database: Resource.InferenceEvent.database,
       dataset: Resource.StatsSyncConfig.dataset,
-      namespace: Resource.R2Sql.namespace,
-      table: Resource.R2Sql.table,
+      table: Resource.InferenceEvent.table,
+      workgroup: Resource.InferenceEvent.workgroup,
+      region: Resource.InferenceEvent.region,
       stage: Resource.App.stage,
     })}`,
   )

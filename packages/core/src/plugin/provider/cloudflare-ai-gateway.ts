@@ -1,12 +1,56 @@
 import os from "os"
-import { InstallationVersion } from "../../installation/version"
+import { App } from "../../app.js"
 import { Effect, Option, Schema } from "effect"
-import { define } from "../internal"
+import { define } from "@opencode/plugin/effect/plugin"
+import { Form } from "@opencode/schema/form"
+import { Provider } from "../../provider.js"
+import { iife } from "../../util/iife.js"
+import { configuredSettings } from "./configured.js"
+
+const providerID = Provider.ID.make("cloudflare-ai-gateway")
 
 export const CloudflareAIGatewayPlugin = define({
-  id: "cloudflare-ai-gateway",
+  id: "opencode.provider.cloudflare.ai.gateway",
   effect: Effect.fn(function* (ctx) {
-    yield* ctx.aisdk.sdk(
+    const configured = yield* configuredSettings(providerID)
+    const form = iife(() => {
+      if (typeof configured?.baseURL === "string") return
+      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || stringOption(configured ?? {}, "accountId")
+      const gatewayId =
+        process.env.CLOUDFLARE_GATEWAY_ID ||
+        stringOption(configured ?? {}, "gatewayId") ||
+        stringOption(configured ?? {}, "gateway")
+      if (accountId && gatewayId) return
+      const accountIdForm = Form.StringField.make({
+        type: "string",
+        key: "accountId",
+        title: "Enter your Cloudflare Account ID",
+        placeholder: "e.g. 1234567890abcdef1234567890abcdef",
+        required: true,
+      })
+      const gatewayIdForm = Form.StringField.make({
+        type: "string",
+        key: "gatewayId",
+        title: "Enter your Cloudflare AI Gateway ID",
+        placeholder: "e.g. my-gateway",
+        required: true,
+      })
+      if (accountId) return Form.Fields.make([gatewayIdForm])
+      if (gatewayId) return Form.Fields.make([accountIdForm])
+      return Form.Fields.make([accountIdForm, gatewayIdForm])
+    })
+    yield* ctx.integration.transform((editor) => {
+      editor.method.update({
+        integrationID: providerID,
+        method: {
+          type: "key",
+          label: "Gateway API token",
+          form,
+        },
+      })
+    })
+    yield* ctx.aisdk.hook(
+      "sdk",
       Effect.fn(function* (evt) {
         if (evt.package !== "ai-gateway-provider") return
         if (evt.options.baseURL) return
@@ -14,25 +58,17 @@ export const CloudflareAIGatewayPlugin = define({
         const config = gatewayConfig(evt.options)
         if (!config) return
         const metadata = gatewayMetadata(evt.options)
-        const { createAiGateway } = yield* Effect.promise(() => import("ai-gateway-provider")).pipe(Effect.orDie)
-        const { createUnified } = yield* Effect.promise(() => import("ai-gateway-provider/providers/unified")).pipe(
-          Effect.orDie,
-        )
+        const { createAiGateway } = yield* Effect.promise(() => import("ai-gateway-provider"))
+        const { createUnified } = yield* Effect.promise(() => import("ai-gateway-provider/providers/unified"))
         const gateway = createAiGateway({
           accountId: config.accountId,
           gateway: config.gatewayId,
           apiKey: config.apiKey,
-          options: gatewayOptions(evt.options, metadata),
+          options: gatewayOptions(evt.options, metadata, ctx.app),
         } as any)
+        const unified = createUnified({ apiKey: config.apiKey })
         evt.sdk = {
           languageModel(modelID: string) {
-            // Workers AI is the only first-party provider whose upstream is Cloudflare itself, so it is
-            // the only one that should receive the Cloudflare token as its upstream Authorization header.
-            // The Unified API addresses Workers AI both with the explicit "workers-ai/" prefix and as
-            // bare "@cf/..." ids. Third-party providers must not receive the token; they rely on the
-            // gateway's stored/BYOK keys instead.
-            const isWorkersAi = modelID.startsWith("workers-ai/") || modelID.startsWith("@cf/")
-            const unified = createUnified(isWorkersAi ? { apiKey: config.apiKey } : {})
             return gateway(unified(modelID))
           },
         }
@@ -47,11 +83,11 @@ type GatewayConfig = {
   apiKey: string
 }
 
-const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 
 function gatewayConfig(options: Record<string, unknown>): GatewayConfig | undefined {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? stringOption(options, "accountId")
-  // Credential projection copies key metadata into options. The prompt stores the
+  // Credential projection copies key metadata into options. The form stores the
   // gateway as gatewayId, while older config examples may use gateway.
   const gatewayId =
     process.env.CLOUDFLARE_GATEWAY_ID ?? stringOption(options, "gatewayId") ?? stringOption(options, "gateway")
@@ -69,7 +105,7 @@ function gatewayMetadata(options: Record<string, unknown>) {
   return raw ? Option.getOrUndefined(decodeJson(raw)) : undefined
 }
 
-function gatewayOptions(options: Record<string, unknown>, metadata: unknown) {
+function gatewayOptions(options: Record<string, unknown>, metadata: unknown, app: App.Info) {
   return {
     metadata,
     cacheTtl: options.cacheTtl,
@@ -77,7 +113,7 @@ function gatewayOptions(options: Record<string, unknown>, metadata: unknown) {
     skipCache: options.skipCache,
     collectLog: options.collectLog,
     headers: {
-      "User-Agent": `opencode/${InstallationVersion} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
+      "User-Agent": `${App.useragent(app)} cloudflare-ai-gateway (${os.platform()} ${os.release()}; ${os.arch()})`,
     },
   }
 }

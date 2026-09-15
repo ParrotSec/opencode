@@ -2,14 +2,14 @@ import { action, useParams, useAction, useSubmission, json, query, createAsync }
 import { createStore } from "solid-js/store"
 import { createMemo, For, Show } from "solid-js"
 import { Modal } from "~/component/modal"
-import { Billing } from "@opencode-ai/console-core/billing.js"
-import { Database, eq, and, isNull } from "@opencode-ai/console-core/drizzle/index.js"
-import { BillingTable, LiteTable } from "@opencode-ai/console-core/schema/billing.sql.js"
-import { WorkspaceTable } from "@opencode-ai/console-core/schema/workspace.sql.js"
-import { Actor } from "@opencode-ai/console-core/actor.js"
-import { Workspace } from "@opencode-ai/console-core/workspace.js"
-import { Subscription } from "@opencode-ai/console-core/subscription.js"
-import { LiteData } from "@opencode-ai/console-core/lite.js"
+import { Billing } from "@opencode/console-core/billing.js"
+import { Database, eq, and, isNull } from "@opencode/console-core/drizzle/index.js"
+import { BillingTable, LiteTable } from "@opencode/console-core/schema/billing.sql.js"
+import { WorkspaceTable } from "@opencode/console-core/schema/workspace.sql.js"
+import { Actor } from "@opencode/console-core/actor.js"
+import { Workspace } from "@opencode/console-core/workspace.js"
+import { Subscription } from "@opencode/console-core/subscription.js"
+import { LiteData } from "@opencode/console-core/lite.js"
 import { withActor } from "~/context/auth.withActor"
 import { queryBillingInfo } from "../../common"
 import styles from "./lite-section.module.css"
@@ -39,7 +39,6 @@ export const queryLiteSubscription = query(async (workspaceID: string) => {
           timeCreated: LiteTable.timeCreated,
           lite: BillingTable.lite,
           region: WorkspaceTable.region,
-          allowTraining: WorkspaceTable.allow_training,
         })
         .from(BillingTable)
         .innerJoin(LiteTable, eq(LiteTable.workspaceID, BillingTable.workspaceID))
@@ -55,7 +54,6 @@ export const queryLiteSubscription = query(async (workspaceID: string) => {
     return {
       mine,
       useBalance: row.lite?.useBalance ?? false,
-      allowTraining: row.allowTraining ?? false,
       region:
         row.region ?? (await Workspace.setDefaultRegion({ country: countryFromRequest(getRequestEvent()?.request) })),
       rollingUsage: Subscription.analyzeRollingUsage({
@@ -156,24 +154,6 @@ const setGoProviderRouting = action(async (form: FormData) => {
   )
 }, "go.providerRouting.set")
 
-const setGoAllowTraining = action(async (form: FormData) => {
-  "use server"
-  const workspaceID = form.get("workspaceID") as string | null
-  if (!workspaceID) return { error: formError.workspaceRequired }
-  const allowTraining = (form.get("allowTraining") as string | null) === "true"
-
-  return json(
-    await withActor(
-      () =>
-        Workspace.update({ allow_training: allowTraining })
-          .then(() => ({ error: undefined }))
-          .catch((e) => ({ error: e.message as string })),
-      workspaceID,
-    ),
-    { revalidate: queryLiteSubscription.key },
-  )
-}, "go.allowTraining.set")
-
 function LiteUsageItem(props: { label: string; usage: { usagePercent: number; resetInSec: number } }) {
   const i18n = useI18n()
 
@@ -206,7 +186,6 @@ export function LiteSection(props: { lite: LiteSubscription | undefined }) {
   const checkoutSubmission = useSubmission(createLiteCheckoutUrl)
   const useBalanceSubmission = useSubmission(setLiteUseBalance)
   const providerRoutingSubmission = useSubmission(setGoProviderRouting)
-  const allowTrainingSubmission = useSubmission(setGoAllowTraining)
   const [store, setStore] = createStore({
     loading: undefined as undefined | "session" | "checkout" | "alipay" | "upi",
     showModal: false,
@@ -285,20 +264,6 @@ export function LiteSection(props: { lite: LiteSubscription | undefined }) {
                 <h3>{i18n.t("workspace.lite.providers.title")}</h3>
                 <p>{i18n.t("workspace.lite.providers.description")}</p>
               </div>
-              <form action={setGoAllowTraining} method="post" data-slot="setting-row">
-                <p>{i18n.t("workspace.lite.providers.allowTraining")}</p>
-                <input type="hidden" name="workspaceID" value={params.id} />
-                <input type="hidden" name="allowTraining" value={sub().allowTraining ? "false" : "true"} />
-                <label data-slot="toggle-label">
-                  <input
-                    type="checkbox"
-                    checked={sub().allowTraining}
-                    disabled={allowTrainingSubmission.pending}
-                    onChange={(e) => e.currentTarget.form?.requestSubmit()}
-                  />
-                  <span></span>
-                </label>
-              </form>
               <form action={setGoProviderRouting} method="post" data-slot="setting-row">
                 <p>{i18n.t("workspace.lite.providers.useChina")}</p>
                 <input type="hidden" name="workspaceID" value={params.id} />
@@ -341,7 +306,6 @@ export function LiteSection(props: { lite: LiteSubscription | undefined }) {
           <ul data-slot="promo-models">
             <li>Grok 4.5</li>
             <li>GPT 5.6 Luna</li>
-            <li>GLM-5.3</li>
             <li>GLM-5.2</li>
             <li>GLM-5.1</li>
             <li>Kimi K3</li>
@@ -349,18 +313,15 @@ export function LiteSection(props: { lite: LiteSubscription | undefined }) {
             <li>Kimi K2.6</li>
             <li>MiniMax M3</li>
             <li>MiniMax M2.7</li>
-            <li>Muse Spark 1.2 Contributor</li>
             <li>Qwen3.8 Max</li>
             <li>Qwen3.7 Max</li>
             <li>Qwen3.7 Plus</li>
             <li>Qwen3.6 Plus</li>
             <li>DeepSeek V4 Pro</li>
             <li>DeepSeek V4 Flash</li>
-            <li>DeepSeek V4 Flash Vision Exp</li>
             <li>MiMo-V2.5</li>
             <li>MiMo-V2.5-Pro</li>
             <li>Hy3</li>
-            <li>Ox Alpha Free</li>
           </ul>
           <p data-slot="promo-description">{i18n.t("workspace.lite.promo.footer")}</p>
           <div data-slot="subscribe-actions">
