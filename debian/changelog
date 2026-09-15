@@ -1,3 +1,9 @@
+opencode (2.0.3-0parrot1) echo; urgency=medium
+
+  * New upstream version 2.0.3
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 15 Sep 2026 15:54:36 +0200
+
 opencode (1.18.21-0parrot7) echo; urgency=medium
 
   * Install two independent application-menu launchers: OpenCode Web starts
