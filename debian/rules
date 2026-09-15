@@ -11,15 +11,16 @@
 #      version) from the network,
 #   2. installs the npm dependencies with `bun install` (pinned by the
 #      committed bun.lock), and
-#   3. builds the CLI for the build host's architecture with
-#      `bun run script/build.ts --single`, which also runs upstream's smoke
-#      test (opencode --version).
+#   3. builds the CLI for the build host's architecture only with
+#      `bun run script/build.ts --single --skip-install` in packages/cli
+#      (upstream 2.x monorepo layout; the web UI is embedded by default).
 #
 # Everything (Bun, deps, models.dev catalog) is fetched from the network at
 # build time: this package REQUIRES a network-enabled build worker and will
 # not build on an offline buildd.
 #
-# Build and embed the web UI so the desktop launcher can start `opencode web`.
+# Build and embed the web UI so the desktop launcher can start `opencode serve`
+# (the `web` command was replaced by `serve` in upstream 2.x).
 # The terminal TUI and all regular CLI commands remain available through
 # /usr/bin/opencode.
 
@@ -28,9 +29,18 @@ export DH_VERBOSE = 1
 # (install cache, tmp). Redirect HOME into the build tree.
 export HOME := $(CURDIR)/debian/fakehome
 
-# Upstream version and the Bun version upstream requires.
-UPSTREAM_VERSION := 1.18.21
-BUN_VERSION := 1.3.14
+# Upstream version and the Bun version upstream requires. Both are derived
+# (from the Debian changelog and the root package.json "packageManager"
+# field) so a new upstream release no longer needs manual rules edits.
+#
+# OPENCODE_VERSION must stay set: upstream's build scripts fall back to
+# `git branch --show-current` without it, which fails in a build tree
+# unpacked from the orig tarball (no .git).
+UPSTREAM_VERSION := $(shell dpkg-parsechangelog -SVersion | sed -n 's/-[^-]*$$//p')
+BUN_VERSION := $(shell sed -n 's/.*"packageManager": *"bun@\([^"]*\)".*/\1/p' package.json)
+ifeq ($(strip $(BUN_VERSION)),)
+$(error opencode: cannot read the required Bun version from package.json "packageManager")
+endif
 
 # Debian arch -> Bun build target name.
 ifeq ($(DEB_HOST_ARCH),amd64)
@@ -46,9 +56,11 @@ endif
 BUN_HOME := $(CURDIR)/debian/.bun-toolchain
 BUN := $(BUN_HOME)/bun/bun
 
-# Where the built binary lands.
-DIST_NAME := opencode-linux-$(BUN_TARGET_ARCH)
-DIST_DIR := packages/opencode/dist/$(DIST_NAME)
+# Where the built binary lands. Upstream 2.x builds from packages/cli and
+# names the per-target output directory cli-linux-<arch>
+# (was opencode-linux-<arch> in the packages/opencode 1.x layout).
+DIST_NAME := cli-linux-$(BUN_TARGET_ARCH)
+DIST_DIR := packages/cli/dist/$(DIST_NAME)
 
 %:
 	dh $@
@@ -77,18 +89,19 @@ override_dh_auto_build:
 	echo "==> bun install (deps pinned by bun.lock; lifecycle scripts skipped:"; \
 	echo "    native modules ship prebuilt binaries and need no node-gyp)"; \
 	bun install --ignore-scripts; \
-	echo "==> building opencode-linux-$(BUN_TARGET_ARCH) (single target with embedded web UI)"; \
-	cd packages/opencode; \
+	echo "==> building $(DIST_NAME) (single target with embedded web UI)"; \
+	cd packages/cli; \
 	OPENCODE_VERSION=$(UPSTREAM_VERSION) \
 		bun run script/build.ts --single --skip-install
 
 # ----------------------------------------------------------------------------
-# Test: the build already ran upstream's `opencode --version` smoke test.
-# The full upstream test suite needs LLM provider credentials; skip it.
+# Test: the staged executable is smoke-tested in the dh_strip sequence
+# below. The full upstream test suite needs LLM provider credentials;
+# skip it.
 # ----------------------------------------------------------------------------
 override_dh_auto_test:
 	@echo "Skipping upstream test suite (requires LLM provider credentials)."
-	@echo "Upstream smoke test (opencode --version) ran during the build."
+	@echo "The staged executable is smoke-tested in the dh_strip sequence."
 
 # ----------------------------------------------------------------------------
 # Install the compiled binary at a stable, architecture-independent path,
@@ -119,5 +132,5 @@ override_dh_dwz:
 # Clean.
 # ----------------------------------------------------------------------------
 override_dh_auto_clean:
-	rm -rf "$(BUN_HOME)" node_modules packages/opencode/dist debian/fakehome
+	rm -rf "$(BUN_HOME)" node_modules packages/cli/dist packages/app/dist debian/fakehome
 	dh_auto_clean

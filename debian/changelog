@@ -1,3 +1,28 @@
+opencode (2.0.3-0parrot2) echo; urgency=medium
+
+  * Fix the build for the upstream 2.x monorepo layout: the CLI package
+    moved from packages/opencode to packages/cli and the build output
+    directory is now packages/cli/dist/cli-linux-<arch> (was
+    packages/opencode/dist/opencode-linux-<arch>). The rules file still
+    cd'ed into the removed directory and the build aborted with
+    "cd: can't cd to packages/opencode".
+  * Build with the Bun version required by upstream's packageManager
+    field (bun 1.4.2 for 2.0.3) instead of the stale 1.3.14 pin: the new
+    upstream build toolchain refuses to run under an older Bun
+    ("This script requires bun@^1.4.2").
+  * Derive the upstream version from the Debian changelog and the Bun
+    toolchain version from package.json instead of hardcoding both in
+    debian/rules, so new upstream versions no longer require manual
+    rules edits (the previous rules would have stamped 2.0.3 binaries
+    with the stale OPENCODE_VERSION 1.18.21).
+  * The `opencode web` command was replaced by `opencode serve` upstream:
+    update the OpenCode Web desktop launcher (and the package
+    description) accordingly.
+  * Clean the packages/cli and packages/app dist directories built by
+    the new build (the web UI is now always embedded by upstream's
+    build script).
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 15 Sep 2026 16:45:00 +0200
+
 opencode (2.0.3-0parrot1) echo; urgency=medium
 
   * New upstream version 2.0.3

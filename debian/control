@@ -24,7 +24,8 @@ Description: open source AI coding agent for the terminal
  dependencies are embedded), so it has no Node.js runtime dependency.
  .
  The package includes the embedded web UI. The desktop launcher starts
- `opencode web`, which runs the local server and opens the browser. The
+ `opencode serve` (the `web` command was renamed upstream), which runs the
+ local API and web server so the UI can be reached from the browser. The
  interactive terminal UI and all other commands remain available by running
  `opencode` from a terminal.
  .

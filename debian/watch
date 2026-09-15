@@ -2,16 +2,18 @@ version=4
 
 # Track upstream opencode releases (GitHub: anomalyco/opencode).
 #
-# The version list is read from the tags page and the matching source archive
-# (the auto-generated tag tarball) is downloaded. opencode fetches its
-# models.dev provider catalog and npm dependencies at build time, so the plain
-# source archive is sufficient (there is no separate "source + data" artifact
-# like pi's).
+# Tags are vX.Y.Z; the matching source archive (the auto-generated tag
+# tarball) is downloaded. opencode fetches its models.dev provider catalog
+# and npm dependencies at build time, so the plain source archive is
+# sufficient (there is no separate "source + data" artifact like pi's).
 #
-# In the mangle the version is captured with (…) and re-inserted with $1.
+# NOTE: uscan has no @VERSION@ substitution variable. The version matched
+# by @ANY_VERSION@ is captured in a group and re-inserted in the mangle
+# replacements with $1. The filenamemangle therefore produces the canonical
+# orig-tarball name opencode_<version>.orig.tar.gz directly.
 
 opts="\
-filenamemangle=s%.*/v?@ANY_VERSION@\.tar\.gz%opencode-@VERSION@.tar.gz%,\
+filenamemangle=s%.*/v?@ANY_VERSION@\.tar\.gz%opencode_$1.orig.tar.gz%,\
 downloadurlmangle=s%^.*/archive/refs/tags/v?(\d+\.\d+\.\d+)\.tar\.gz$%https://github.com/anomalyco/opencode/archive/refs/tags/v$1.tar.gz%\
 " \
   https://github.com/anomalyco/opencode/tags \
