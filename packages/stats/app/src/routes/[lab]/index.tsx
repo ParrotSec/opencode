@@ -1,5 +1,5 @@
 import { Meta, Title } from "@solidjs/meta"
-import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
+import { ProviderIcon } from "@opencode/ui/provider-icon"
 import {
   getStatsLabData,
   getStatsHomeData,
@@ -7,7 +7,7 @@ import {
   type MarketDay,
   type ModelUsagePoint,
   type StatsLabData,
-} from "@opencode-ai/stats-core/domain/home"
+} from "@opencode/stats-core/domain/home"
 import { createAsync, query, useParams } from "@solidjs/router"
 import { createMemo, createSignal, createUniqueId, For, onMount, Show, type JSX } from "solid-js"
 import { getRequestEvent } from "solid-js/web"
@@ -651,7 +651,7 @@ function LabModelTooltip(props: { state: LabModelTooltipState }) {
           </span>
           <strong>{props.state.model.name}</strong>
         </div>
-        <p>{props.state.model.description ?? "Recent OpenCode usage, share, context, and output limits."}</p>
+        <p>{props.state.model.description ?? "Recent OpenCode Go usage, share, context, and output limits."}</p>
       </div>
       <div data-slot="tooltip-divider" />
       <div data-slot="lab-model-tooltip-metrics">

@@ -1,21 +1,21 @@
-import { AISDK } from "@opencode-ai/core/aisdk"
+import { AISDK } from "@opencode/core/aisdk"
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
-import { Catalog } from "@opencode-ai/core/catalog"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { PluginHost } from "@opencode-ai/core/plugin/host"
-import { CloudflareWorkersAIPlugin } from "@opencode-ai/core/plugin/provider/cloudflare-workers-ai"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import type { LanguageModelV3 } from "@ai-sdk/provider"
+import { Catalog } from "@opencode/core/catalog"
+import { Model } from "@opencode/core/model"
+import { Plugin } from "@opencode/core/plugin"
+import { PluginHost } from "@opencode/core/plugin/host"
+import { CloudflareWorkersAIPlugin } from "@opencode/core/plugin/provider/cloudflare-workers-ai"
+import { Provider } from "@opencode/core/provider"
+import { Integration } from "@opencode/core/integration"
+import { fakeSelectorSdk } from "../fixture/selector"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
 const it = testEffect(PluginTestLayer)
 
 const addPlugin = Effect.fn(function* () {
-  const plugin = yield* PluginV2.Service
-  const aisdk = yield* AISDK.Service
+  const plugin = yield* Plugin.Service
   const host = yield* PluginHost.make(plugin)
   yield* CloudflareWorkersAIPlugin.effect(host)
 })
@@ -46,19 +46,6 @@ function withEnv<A, E, R>(vars: Record<string, string | undefined>, effect: () =
   )
 }
 
-function fakeSelectorSdk(calls: string[]) {
-  const make = (method: string) => (id: string) => {
-    calls.push(`${method}:${id}`)
-    return { modelId: id, provider: method, specificationVersion: "v3" } as unknown as LanguageModelV3
-  }
-  return {
-    responses: make("responses"),
-    messages: make("messages"),
-    chat: make("chat"),
-    languageModel: make("languageModel"),
-  }
-}
-
 function cloudflareLanguage(sdk: unknown, modelID = "@cf/model") {
   return (sdk as { languageModel: (id: string) => { config: CloudflareConfig; provider: string } }).languageModel(
     modelID,
@@ -79,31 +66,58 @@ function cloudflareHeaders(sdk: unknown, modelID = "@cf/model") {
 }
 
 describe("CloudflareWorkersAIPlugin", () => {
+  it.effect("registers an account form when the environment does not provide one", () =>
+    withEnv({ CLOUDFLARE_ACCOUNT_ID: undefined }, () =>
+      Effect.gen(function* () {
+        yield* addPlugin()
+        const integrations = yield* Integration.Service
+        expect((yield* integrations.get(Integration.ID.make("cloudflare-workers-ai")))?.methods).toContainEqual({
+          type: "key",
+          label: "API key",
+          form: [
+            {
+              type: "string",
+              key: "accountId",
+              title: "Enter your Cloudflare Account ID",
+              placeholder: "e.g. 1234567890abcdef1234567890abcdef",
+              required: true,
+            },
+          ],
+        })
+      }),
+    ),
+  )
+
   it.effect("maps account ID to endpoint URL and creates an OpenAI-compatible SDK", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_KEY: "key" }, () =>
       Effect.gen(function* () {
-        const plugin = yield* PluginV2.Service
         const aisdk = yield* AISDK.Service
         const catalog = yield* Catalog.Service
         yield* catalog.transform((catalog) =>
-          catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
-            provider.api = { type: "aisdk", package: "test-provider" }
+          catalog.provider.update(Provider.ID.make("cloudflare-workers-ai"), (provider) => {
+            provider.package = Provider.aisdk("test-provider")
           }),
         )
         yield* addPlugin()
-        const provider = required(yield* catalog.provider.get(ProviderV2.ID.make("cloudflare-workers-ai")))
+        const integrations = yield* Integration.Service
+        expect((yield* integrations.get(Integration.ID.make("cloudflare-workers-ai")))?.methods).toContainEqual({
+          type: "key",
+          label: "API key",
+        })
+        const provider = required(yield* catalog.provider.get(Provider.ID.make("cloudflare-workers-ai")))
         const sdk = yield* aisdk.runSDK({
-          model: ModelV2.Info.make({
-            ...ModelV2.Info.empty(ProviderV2.ID.make("cloudflare-workers-ai"), ModelV2.ID.make("@cf/model")),
-            api: { id: ModelV2.ID.make("@cf/model"), ...provider.api },
+          model: Model.Info.make({
+            ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("@cf/model")),
+            modelID: Model.ID.make("@cf/model"),
+            package: provider.package,
+            settings: provider.settings,
           }),
           package: "@ai-sdk/openai-compatible",
           options: { name: "cloudflare-workers-ai", headers: { custom: "header" } },
         })
-        expect(provider.api).toEqual({
-          type: "aisdk",
-          package: "test-provider",
-          url: "https://api.cloudflare.com/client/v4/accounts/acct/ai/v1",
+        expect(provider).toMatchObject({
+          package: "aisdk:test-provider",
+          settings: { baseURL: "https://api.cloudflare.com/client/v4/accounts/acct/ai/v1" },
         })
         expect(sdk.sdk).toBeDefined()
       }),
@@ -115,15 +129,15 @@ describe("CloudflareWorkersAIPlugin", () => {
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
         yield* catalog.transform((catalog) =>
-          catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
-            provider.api = { type: "aisdk", package: "test-provider", url: "https://proxy.example/v1" }
+          catalog.provider.update(Provider.ID.make("cloudflare-workers-ai"), (provider) => {
+            provider.package = Provider.aisdk("test-provider")
+            provider.settings = { ...provider.settings, baseURL: "https://proxy.example/v1" }
           }),
         )
         yield* addPlugin()
-        expect(required(yield* catalog.provider.get(ProviderV2.ID.make("cloudflare-workers-ai"))).api).toEqual({
-          type: "aisdk",
-          package: "test-provider",
-          url: "https://proxy.example/v1",
+        expect(required(yield* catalog.provider.get(Provider.ID.make("cloudflare-workers-ai")))).toMatchObject({
+          package: "aisdk:test-provider",
+          settings: { baseURL: "https://proxy.example/v1" },
         })
       }),
     ),
@@ -132,18 +146,25 @@ describe("CloudflareWorkersAIPlugin", () => {
   it.effect("allows a configured baseURL without account ID", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: undefined, CLOUDFLARE_API_KEY: "key" }, () =>
       Effect.gen(function* () {
-        const plugin = yield* PluginV2.Service
         const aisdk = yield* AISDK.Service
+        const catalog = yield* Catalog.Service
+        yield* catalog.transform((catalog) =>
+          catalog.provider.update(Provider.ID.make("cloudflare-workers-ai"), (provider) => {
+            provider.settings = { ...provider.settings, baseURL: "https://proxy.example/v1" }
+          }),
+        )
         yield* addPlugin()
+        const integrations = yield* Integration.Service
+        expect((yield* integrations.get(Integration.ID.make("cloudflare-workers-ai")))?.methods).toContainEqual({
+          type: "key",
+          label: "API key",
+        })
         const result = yield* aisdk.runSDK({
-          model: ModelV2.Info.make({
-            ...ModelV2.Info.empty(ProviderV2.ID.make("cloudflare-workers-ai"), ModelV2.ID.make("@cf/model")),
-            api: {
-              id: ModelV2.ID.make("@cf/model"),
-              type: "aisdk",
-              package: "@ai-sdk/openai-compatible",
-              url: "https://proxy.example/v1",
-            },
+          model: Model.Info.make({
+            ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("@cf/model")),
+            modelID: Model.ID.make("@cf/model"),
+            package: "aisdk:@ai-sdk/openai-compatible",
+            settings: { baseURL: "https://proxy.example/v1" },
           }),
           package: "@ai-sdk/openai-compatible",
           options: { name: "cloudflare-workers-ai", baseURL: "https://proxy.example/v1" },
@@ -158,16 +179,15 @@ describe("CloudflareWorkersAIPlugin", () => {
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
         yield* catalog.transform((catalog) =>
-          catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
-            provider.api = { type: "aisdk", package: "test-provider" }
-            provider.request.body.accountId = "configured-acct"
+          catalog.provider.update(Provider.ID.make("cloudflare-workers-ai"), (provider) => {
+            provider.package = Provider.aisdk("test-provider")
+            provider.settings = { ...provider.settings, accountId: "configured-acct" }
           }),
         )
         yield* addPlugin()
-        expect(required(yield* catalog.provider.get(ProviderV2.ID.make("cloudflare-workers-ai"))).api).toEqual({
-          type: "aisdk",
-          package: "test-provider",
-          url: "https://api.cloudflare.com/client/v4/accounts/env-acct/ai/v1",
+        expect(required(yield* catalog.provider.get(Provider.ID.make("cloudflare-workers-ai")))).toMatchObject({
+          package: "aisdk:test-provider",
+          settings: { baseURL: "https://api.cloudflare.com/client/v4/accounts/env-acct/ai/v1" },
         })
       }),
     ),
@@ -176,18 +196,14 @@ describe("CloudflareWorkersAIPlugin", () => {
   it.effect("uses env API key over auth or configured API key and keeps the Cloudflare User-Agent", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_KEY: "env-key" }, () =>
       Effect.gen(function* () {
-        const plugin = yield* PluginV2.Service
         const aisdk = yield* AISDK.Service
         yield* addPlugin()
         const result = yield* aisdk.runSDK({
-          model: ModelV2.Info.make({
-            ...ModelV2.Info.empty(ProviderV2.ID.make("cloudflare-workers-ai"), ModelV2.ID.make("@cf/model")),
-            api: {
-              id: ModelV2.ID.make("@cf/model"),
-              type: "aisdk",
-              package: "@ai-sdk/openai-compatible",
-              url: "https://proxy.example/v1",
-            },
+          model: Model.Info.make({
+            ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("@cf/model")),
+            modelID: Model.ID.make("@cf/model"),
+            package: "aisdk:@ai-sdk/openai-compatible",
+            settings: { baseURL: "https://proxy.example/v1" },
           }),
           package: "@ai-sdk/openai-compatible",
           options: {
@@ -208,18 +224,14 @@ describe("CloudflareWorkersAIPlugin", () => {
   it.effect("expands account ID vars in endpoint URLs", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_KEY: "key" }, () =>
       Effect.gen(function* () {
-        const plugin = yield* PluginV2.Service
         const aisdk = yield* AISDK.Service
         yield* addPlugin()
         const result = yield* aisdk.runSDK({
-          model: ModelV2.Info.make({
-            ...ModelV2.Info.empty(ProviderV2.ID.make("cloudflare-workers-ai"), ModelV2.ID.make("@cf/model")),
-            api: {
-              id: ModelV2.ID.make("@cf/model"),
-              type: "aisdk",
-              package: "@ai-sdk/openai-compatible",
-              url: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
-            },
+          model: Model.Info.make({
+            ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("@cf/model")),
+            modelID: Model.ID.make("@cf/model"),
+            package: "aisdk:@ai-sdk/openai-compatible",
+            settings: { baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1" },
           }),
           package: "@ai-sdk/openai-compatible",
           options: {
@@ -236,14 +248,14 @@ describe("CloudflareWorkersAIPlugin", () => {
 
   it.effect("selects languageModel with the API model ID", () =>
     Effect.gen(function* () {
-      const plugin = yield* PluginV2.Service
       const aisdk = yield* AISDK.Service
       const calls: string[] = []
       yield* addPlugin()
       const result = yield* aisdk.runLanguage({
-        model: ModelV2.Info.make({
-          ...ModelV2.Info.empty(ProviderV2.ID.make("cloudflare-workers-ai"), ModelV2.ID.make("alias")),
-          api: { id: ModelV2.ID.make("@cf/api-model"), type: "aisdk", package: "test-provider" },
+        model: Model.Info.make({
+          ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("alias")),
+          modelID: Model.ID.make("@cf/api-model"),
+          package: "aisdk:test-provider",
         }),
         sdk: fakeSelectorSdk(calls),
         options: {},
@@ -256,18 +268,14 @@ describe("CloudflareWorkersAIPlugin", () => {
   it.effect("does not create an SDK for non OpenAI-compatible packages", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_KEY: "key" }, () =>
       Effect.gen(function* () {
-        const plugin = yield* PluginV2.Service
         const aisdk = yield* AISDK.Service
         yield* addPlugin()
         const result = yield* aisdk.runSDK({
-          model: ModelV2.Info.make({
-            ...ModelV2.Info.empty(ProviderV2.ID.make("cloudflare-workers-ai"), ModelV2.ID.make("@cf/model")),
-            api: {
-              id: ModelV2.ID.make("@cf/model"),
-              type: "aisdk",
-              package: "@ai-sdk/anthropic",
-              url: "https://proxy.example/v1",
-            },
+          model: Model.Info.make({
+            ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("@cf/model")),
+            modelID: Model.ID.make("@cf/model"),
+            package: "aisdk:@ai-sdk/anthropic",
+            settings: { baseURL: "https://proxy.example/v1" },
           }),
           package: "@ai-sdk/anthropic",
           options: { name: "cloudflare-workers-ai" },

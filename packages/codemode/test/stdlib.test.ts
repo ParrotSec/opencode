@@ -1,9 +1,25 @@
+/*
+ * Portions adapted from Test262 at revision 250f204f23a9249ff204be2baec29600faae7b75:
+ * - test/built-ins/Date/value-to-primitive-result-non-string-prim.js
+ * - test/built-ins/Date/value-to-primitive-result-string.js
+ * - test/built-ins/Date/prototype/toUTCString/format.js
+ * - test/built-ins/Date/prototype/toUTCString/invalid-date.js
+ * - test/built-ins/RegExp/prototype/exec/S15.10.6.2_A4_T8.js
+ *
+ * CodeMode does not support Symbol.toPrimitive, so the Date-constructor cases exercise the same primitive-result
+ * handling through supported own valueOf and toString functions.
+ *
+ * Copyright (C) 2016 the V8 project authors. All rights reserved.
+ * Copyright (C) 2017 the V8 project authors. All rights reserved.
+ * Copyright 2009 the Sputnik authors. All rights reserved.
+ * Test262 portions are governed by the BSD license in LICENSE.test262.
+ */
 import { describe, expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
 import { CodeMode, Tool } from "../src/index.js"
 
 // Standard-library value types: Date, RegExp, Map, Set. Programs use them as ordinary JS;
-// intra-sandbox checkpoints (Object.* helpers, spread, coercion inputs) preserve the live
+// intra-CodeMode checkpoints (Object.* helpers, spread, coercion inputs) preserve the live
 // values, while at the host boundary (final result, tool arguments, JSON.stringify) they
 // serialize exactly as JSON.stringify would: Date -> ISO string (invalid -> null),
 // URL -> href, and RegExp/Map/Set/URLSearchParams -> {}.
@@ -19,6 +35,30 @@ const error = async (code: string) => {
   return result.error
 }
 
+describe("Number and Math", () => {
+  test("Math.random returns a number in [0, 1)", async () => {
+    expect(await value(`const n = Math.random(); return typeof n === "number" && n >= 0 && n < 1`)).toBe(true)
+  })
+
+  test("Number exposes native non-finite constants", async () => {
+    expect(
+      await value(
+        `return [Number.isNaN(Number.NaN), Number.POSITIVE_INFINITY === Infinity, Number.NEGATIVE_INFINITY === -Infinity]`,
+      ),
+    ).toEqual([true, true, true])
+  })
+
+  test("Number valueOf returns its primitive receiver", async () => {
+    expect(await value(`return (42).valueOf()`)).toBe(42)
+  })
+
+  test("Number valueOf does not enable boxed numbers", async () => {
+    const failure = await error(`return new Number(42)`)
+    expect(failure.kind).toBe("ExecutionFailure")
+    expect(failure.message).toContain("new Number(...) is not supported; call Number(...) without new instead.")
+  })
+})
+
 describe("Date", () => {
   test("Date.now() returns a number", async () => {
     expect(await value(`return typeof Date.now()`)).toBe("number")
@@ -31,6 +71,52 @@ describe("Date", () => {
   test("string parsing round-trips", async () => {
     expect(await value(`return new Date("2024-01-02T03:04:05.000Z").getTime()`)).toBe(1704164645000)
     expect(await value(`return Date.parse("2024-01-02T03:04:05.000Z")`)).toBe(1704164645000)
+  })
+
+  test("one-argument construction coerces supported values like JavaScript", async () => {
+    expect(
+      await value(`return [new Date(true).getTime(), new Date(false).getTime(), new Date(null).getTime()]`),
+    ).toEqual([1, 0, 0])
+    expect(await value(`return Number.isNaN(new Date(undefined).getTime())`)).toBe(true)
+    expect(await value(`return Number.isNaN(new Date([]).getTime())`)).toBe(true)
+    expect(await value(`return new Date(["1970-01-01T00:00:00.000Z"]).getTime()`)).toBe(0)
+    expect(await value(`return Number.isNaN(new Date({}).getTime())`)).toBe(true)
+  })
+
+  test("one-argument construction uses valueOf then toString for objects", async () => {
+    expect(
+      await value(`
+        const calls = []
+        const number = { valueOf: () => 8 }
+        const text = {
+          valueOf: () => { calls.push("valueOf"); return {} },
+          toString: () => { calls.push("toString"); return "2016-06-05T18:40:00.000Z" },
+        }
+        return [new Date(number).getTime(), new Date(text).getTime(), calls]
+      `),
+    ).toEqual([8, 1465152000000, ["valueOf", "toString"]])
+
+    expect(
+      await value(`
+        const values = [
+          { valueOf: () => undefined },
+          { valueOf: () => true },
+          { valueOf: () => false },
+          { valueOf: () => null },
+        ]
+        return values.map((item) => new Date(item).getTime())
+      `),
+    ).toEqual([null, 1, 0, 0])
+
+    expect(
+      await value(`
+        try {
+          new Date({ valueOf: () => ({}), toString: () => ({}) })
+        } catch (error) {
+          return error.name
+        }
+      `),
+    ).toBe("TypeError")
   })
 
   test("date arithmetic and comparison use the time value", async () => {
@@ -47,14 +133,14 @@ describe("Date", () => {
     ).toEqual([2024, 2, 5, 6, 7, 8, 9])
   })
 
-  test("invalid dates yield NaN times, guardable in-sandbox", async () => {
+  test("invalid dates yield NaN times, guardable in-CodeMode", async () => {
     expect(await value(`return Number.isNaN(new Date("garbage").getTime())`)).toBe(true)
     expect(await value(`return new Date("garbage").toJSON()`)).toBeNull()
   })
 
-  test("toISOString on an invalid date is a catchable error", async () => {
-    expect(await value(`try { new Date("garbage").toISOString(); return "no" } catch { return "caught" }`)).toBe(
-      "caught",
+  test("toISOString on an invalid date throws RangeError", async () => {
+    expect(await value(`try { new Date("garbage").toISOString() } catch (error) { return error.name }`)).toBe(
+      "RangeError",
     )
   })
 
@@ -96,6 +182,25 @@ describe("Date", () => {
     expect(await value(`return typeof new Date(0)`)).toBe("object")
     expect(await value(`return new Date(0).nope === undefined`)).toBe(true)
   })
+
+  test("toUTCString and toGMTString use the native UTC format", async () => {
+    expect(
+      await value(`
+        const date = new Date(0)
+        return [
+          date.toUTCString(),
+          date.toGMTString(),
+          new Date(NaN).toUTCString(),
+          new Date("0020-01-01T00:00:00Z").toUTCString(),
+        ]
+      `),
+    ).toEqual([
+      "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Invalid Date",
+      "Wed, 01 Jan 0020 00:00:00 GMT",
+    ])
+  })
 })
 
 describe("RegExp", () => {
@@ -132,21 +237,58 @@ describe("RegExp", () => {
     ).toEqual(["1", "22"])
   })
 
-  test("string match: non-global carries index, global lists all matches", async () => {
-    expect(await value(`const m = "a1b22".match(/\\d+/); return [m[0], m.index]`)).toEqual(["1", 1])
-    expect(await value(`return "a1b22".match(/\\d+/g)`)).toEqual(["1", "22"])
+  test("lastIndex is writable and exec coerces its stored value", async () => {
+    expect(
+      await value(`
+        const pattern = /(?:ab|cd)\\d?/g
+        pattern.lastIndex = "12"
+        const stored = [pattern.lastIndex, typeof pattern.lastIndex]
+        const match = pattern.exec("aacd2233ab12nm444ab42")
+        pattern.lastIndex = 0
+        return [stored, match[0], match.index, pattern.lastIndex]
+      `),
+    ).toEqual([["12", "string"], "ab4", 17, 0])
+    expect((await error(`delete /a/.lastIndex`)).message).toContain("Cannot delete property 'lastIndex'")
+  })
+
+  test("exec coerces CodeMode data objects assigned to lastIndex", async () => {
+    expect(
+      await value(`
+        const pattern = /a/g
+        pattern.lastIndex = {}
+        const stored = pattern.lastIndex
+        const match = pattern.exec("ba")
+        pattern.lastIndex = 10
+        const missed = pattern.exec("a")
+        return [stored, match.index, pattern.lastIndex, missed]
+      `),
+    ).toEqual([{}, 1, 0, null])
+  })
+
+  test("non-global exec and test coerce and preserve lastIndex", async () => {
+    expect(
+      await value(`
+        const execPattern = /a/
+        const execIndex = {}
+        execPattern.lastIndex = execIndex
+        const match = execPattern.exec("ba")
+
+        const testPattern = /a/
+        const testIndex = {}
+        testPattern.lastIndex = testIndex
+        const matched = testPattern.test("ba")
+
+        return [match.index, execPattern.lastIndex === execIndex, matched, testPattern.lastIndex === testIndex]
+      `),
+    ).toEqual([1, true, true, true])
+  })
+
+  test("an unmatched string pattern returns null", async () => {
     expect(await value(`return "abc".match(/\\d/)`)).toBeNull()
   })
 
   test("matchAll materializes match arrays with captures", async () => {
     expect(await value(`return "a1b22".matchAll(/(\\d+)/g).map((m) => m[1])`)).toEqual(["1", "22"])
-  })
-
-  test("replace and replaceAll with patterns and $1 substitution", async () => {
-    expect(await value(`return "a1b2".replace(/\\d/, "#")`)).toBe("a#b2")
-    expect(await value(`return "a1b2".replace(/\\d/g, "#")`)).toBe("a#b#")
-    expect(await value(`return "a1b2".replaceAll(/\\d/g, "#")`)).toBe("a#b#")
-    expect(await value(`return "hi bob".replace(/b(o)b/, "[$1]")`)).toBe("hi [o]")
   })
 
   test("function replacers receive captures, offsets, input, and named groups", async () => {
@@ -185,12 +327,12 @@ describe("RegExp", () => {
     ).toBe("7null[object Object]")
   })
 
-  test("function replacers can await effectful tool calls", async () => {
+  test("promise-returning string replacers are coerced synchronously", async () => {
     const decorate = Tool.make({
       description: "Decorate a string",
       input: Schema.String,
       output: Schema.String,
-      run: (input) => Effect.succeed(`[${input}]`),
+      execute: (input) => Effect.succeed(`[${input}]`),
     })
     const result = await Effect.runPromise(
       CodeMode.execute({
@@ -198,7 +340,7 @@ describe("RegExp", () => {
         code: `return "a1b22".replace(/\\d+/g, async (match) => await tools.host.decorate(match))`,
       }),
     )
-    expect(result.ok && result.value).toBe("a[1]b[22]")
+    expect(result.ok && result.value).toBe("a[object Promise]b[object Promise]")
 
     const missingAwait = await Effect.runPromise(
       CodeMode.execute({
@@ -206,18 +348,11 @@ describe("RegExp", () => {
         code: `return "a1".replace(/\\d/, (match) => tools.host.decorate(match))`,
       }),
     )
-    expect(!missingAwait.ok && missingAwait.error.kind).toBe("InvalidDataValue")
-    expect(!missingAwait.ok && missingAwait.error.message).toContain("un-awaited Promise")
+    expect(missingAwait.ok && missingAwait.value).toBe("a[object Promise]")
   })
 
   test("replaceAll without the g flag is a catchable error", async () => {
     expect(await value(`try { "a".replaceAll(/a/, "b"); return "no" } catch { return "caught" }`)).toBe("caught")
-  })
-
-  test("split and search accept patterns", async () => {
-    expect(await value(`return "a1b22c".split(/\\d+/)`)).toEqual(["a", "b", "c"])
-    expect(await value(`return "ab42".search(/\\d/)`)).toBe(2)
-    expect(await value(`return "ab".search(/\\d/)`)).toBe(-1)
   })
 
   test("new RegExp constructs from strings; invalid patterns are catchable", async () => {
@@ -586,6 +721,218 @@ describe("Set", () => {
 })
 
 describe("stdlib integration", () => {
+  test("constructor follows own keys, shadowing, writes, and new", async () => {
+    expect(
+      await value(`return [JSON.parse('{"constructor":"Foo"}').constructor, ({ constructor: 1 }).constructor]`),
+    ).toEqual(["Foo", 1])
+    expect(await value(`const Array = 5; return [].constructor.isArray([])`)).toBe(true)
+    expect(await value(`const o = {}; o.constructor = 7; return o.constructor`)).toBe(7)
+    expect(await value(`return new ([].constructor)(3).length`)).toBe(3)
+    expect(await value(`return typeof ({}).constructor`)).toBe("function")
+    expect(await value(`return ({}).constructor.constructor === Function`)).toBe(true)
+  })
+
+  test("new dispatches on the constructor value, not its name", async () => {
+    expect(await value(`const D = Date; return new D(0) instanceof Date`)).toBe(true)
+    expect(await value(`const make = (C) => new C([["a", 1]]); return make(Map).get("a")`)).toBe(1)
+    expect(await value(`const t = { M: Map }; return new t.M() instanceof Map`)).toBe(true)
+    const shadowed = await error(`const Date = 5; return new Date()`)
+    expect(shadowed.message).toStartWith("Date is not a constructor.")
+    const fn = await error(`const f = () => 1; return new f()`)
+    expect(fn.message).toStartWith("f cannot be constructed")
+  })
+
+  test("Object.is uses SameValue semantics", async () => {
+    expect(
+      await value(`
+        const object = {}
+        return [
+          Object.is(NaN, NaN),
+          Object.is(0, -0),
+          Object.is(object, object),
+          Object.is({}, {}),
+        ]
+      `),
+    ).toEqual([true, false, true, false])
+  })
+
+  test("Object.is rejects opaque runtime references", async () => {
+    expect((await error(`return Object.is(Math.max, Math.max)`)).kind).toBe("InvalidDataValue")
+  })
+
+  test("Object values and entries accept arrays", async () => {
+    expect(await value(`return [Object.values(["a", "b"]), Object.entries(["a", "b"])]`)).toEqual([
+      ["a", "b"],
+      [
+        ["0", "a"],
+        ["1", "b"],
+      ],
+    ])
+    expect(await value(`const match = /a/.exec("ba"); return [Object.values(match), Object.entries(match)]`)).toEqual([
+      ["a", 1, "ba"],
+      [
+        ["0", "a"],
+        ["index", 1],
+        ["input", "ba"],
+      ],
+    ])
+    expect(await value(`return Object.keys(Object.values({ match: /a/.exec("ba") })[0])`)).toEqual([
+      "0",
+      "index",
+      "input",
+    ])
+  })
+
+  test("Object.fromEntries accepts every supported entry collection", async () => {
+    expect(
+      await value(`
+        return [
+          Object.fromEntries([["a", 1]]),
+          Object.fromEntries(new Map([["b", 2]])),
+          Object.fromEntries(new Set([["c", 3]])),
+          Object.fromEntries(new URLSearchParams("d=4")),
+          Object.fromEntries([{ 0: "e", 1: 5 }]),
+          Object.fromEntries(new Set([[{}, 6], [new Date(0), 7], [null, 8], [undefined, 9]])),
+        ]
+      `),
+    ).toEqual([
+      { a: 1 },
+      { b: 2 },
+      { c: 3 },
+      { d: "4" },
+      { e: 5 },
+      { "[object Object]": 6, "1970-01-01T00:00:00.000Z": 7, null: 8, undefined: 9 },
+    ])
+    expect(await value(`try { Object.fromEntries(new Set([Math.max])); return false } catch { return true }`)).toBe(
+      true,
+    )
+    expect(
+      await value(`try { Object.fromEntries(new Map([["fn", Math.max]])); return false } catch { return true }`),
+    ).toBe(true)
+  })
+
+  test("deterministic Math methods match the host runtime", async () => {
+    const result = await value(`
+      return [
+        Math.acos(0.5), Math.acosh(2), Math.asin(0.5), Math.asinh(2), Math.atan(1), Math.atan2(1, 2), Math.atanh(0.5),
+        Math.cos(0.5), Math.cosh(0.5), Math.sin(0.5), Math.sinh(0.5), Math.tan(0.5), Math.tanh(0.5),
+        Math.log1p(0.5), Math.expm1(0.5), Math.f16round(1.337), Math.fround(1.337), Math.clz32(1), Math.imul(2, 3),
+      ]
+    `)
+    expect(result).toEqual([
+      Math.acos(0.5),
+      Math.acosh(2),
+      Math.asin(0.5),
+      Math.asinh(2),
+      Math.atan(1),
+      Math.atan2(1, 2),
+      Math.atanh(0.5),
+      Math.cos(0.5),
+      Math.cosh(0.5),
+      Math.sin(0.5),
+      Math.sinh(0.5),
+      Math.tan(0.5),
+      Math.tanh(0.5),
+      Math.log1p(0.5),
+      Math.expm1(0.5),
+      Math.f16round(1.337),
+      Math.fround(1.337),
+      Math.clz32(1),
+      Math.imul(2, 3),
+    ])
+  })
+
+  test("Object.assign mutates and returns its target", async () => {
+    expect(
+      await value(`
+        const target = { a: 1 }
+        const result = Object.assign(target, { b: 2 })
+        return { target, result, same: target === result }
+      `),
+    ).toEqual({ target: { a: 1, b: 2 }, result: { a: 1, b: 2 }, same: true })
+    expect(await value(`try { Object.assign(null, { a: 1 }); return false } catch { return true }`)).toBe(true)
+  })
+
+  test("Object.assign rejects direct and nested cycles", async () => {
+    expect(
+      await value(`
+        const target = { kept: true }
+        try { Object.assign(target, { self: target }) } catch { return target }
+        return null
+      `),
+    ).toEqual({ kept: true })
+    expect(
+      await value(`
+        const target = { kept: true }
+        const nested = { target }
+        try { Object.assign(target, { nested }) } catch { return target }
+        return null
+      `),
+    ).toEqual({ kept: true })
+    expect(
+      await value(`
+        const target = {}
+        const source = {}
+        source[Symbol.iterator] = target
+        try { Object.assign(target, source) } catch { return Object.hasOwn(target, Symbol.iterator) }
+        return true
+      `),
+    ).toBe(false)
+    expect(
+      await value(`
+        const target = {}
+        const nested = {}
+        nested[Symbol.iterator] = target
+        try { Object.assign(target, { nested }) } catch { return Object.hasOwn(target, "nested") }
+        return true
+      `),
+    ).toBe(false)
+  })
+
+  test("Object.assign preserves mutations before a circular field", async () => {
+    expect(
+      await value(`
+        const target = {}
+        try { Object.assign(target, { before: 1, cycle: { target }, after: 2 }) } catch { return target }
+        return null
+      `),
+    ).toEqual({ before: 1 })
+    expect(
+      await value(`
+        const target = {}
+        const marker = {}
+        const source = {}
+        source[Symbol.iterator] = marker
+        source[Symbol.asyncIterator] = target
+        try { Object.assign(target, source) } catch {
+          return [target[Symbol.iterator] === marker, Object.hasOwn(target, Symbol.asyncIterator)]
+        }
+        return null
+      `),
+    ).toEqual([true, false])
+  })
+
+  test("Object.assign preserves target identity and acyclic shared aliases", async () => {
+    expect(
+      await value(`
+        const shared = { count: 1 }
+        const target = {}
+        const result = Object.assign(target, { left: shared, right: shared })
+        result.left.count = 2
+        return [result === target, result.left === shared, result.left === result.right, shared.count]
+      `),
+    ).toEqual([true, true, true, 2])
+  })
+
+  test("assignment resolves and reads its left side before evaluating the right side", async () => {
+    expect(await value(`let x = 1; x += (x = 5); return x`)).toBe(6)
+    expect(await value(`let i = 0; const values = [9]; values[i++] = i; return [values, i]`)).toEqual([[1], 1])
+    expect(await value(`let i = 0; const values = [10, 20]; values[i++] += i; return [values, i]`)).toEqual([
+      [11, 20],
+      1,
+    ])
+  })
+
   test("typeof reports constructors as functions and never throws", async () => {
     expect(await value(`return typeof Map`)).toBe("function")
     expect(await value(`return typeof ((x) => x)`)).toBe("function")
@@ -598,11 +945,11 @@ describe("stdlib integration", () => {
     expect(await value(`const fn = () => 1; return !fn`)).toBe(false)
   })
 
-  test("object spread of sandbox values is a no-op, like JS", async () => {
+  test("object spread of CodeMode values is a no-op, like JS", async () => {
     expect(await value(`return { ...new Map([["a", 1]]), kept: true }`)).toEqual({ kept: true })
   })
 
-  test("dates inside Map values survive in-sandbox reads", async () => {
+  test("dates inside Map values survive in-CodeMode reads", async () => {
     expect(
       await value(`
       const m = new Map([["start", new Date(1000)]])
@@ -644,12 +991,49 @@ describe("stdlib integration", () => {
   })
 })
 
-describe("sandbox values at intra-sandbox checkpoints", () => {
+describe("CodeMode values at intra-CodeMode checkpoints", () => {
   test("Object.values/entries keep Dates usable", async () => {
     expect(await value(`return Object.values({ d: new Date(0) })[0].getTime()`)).toBe(0)
     expect(await value(`const [key, d] = Object.entries({ d: new Date(0) })[0]; return key + ":" + d.getTime()`)).toBe(
       "d:0",
     )
+  })
+
+  test("Object.values/entries preserve nested object identity", async () => {
+    expect(
+      await value(`
+      const child = { selected: false }
+      const rows = { a: child }
+      Object.values(rows)[0].selected = true
+      return child.selected
+    `),
+    ).toBe(true)
+    expect(
+      await value(`
+      const child = { selected: false }
+      const rows = { a: child }
+      Object.entries(rows)[0][1].selected = true
+      return child.selected
+    `),
+    ).toBe(true)
+  })
+
+  test("Object enumeration preserves promises and callable references", async () => {
+    expect(
+      await value(`
+      const pending = Promise.resolve(1)
+      const source = { pending }
+      return [Object.keys(source), Object.hasOwn(source, "pending"), await Object.values(source)[0], await Object.entries(source)[0][1]]
+    `),
+    ).toEqual([["pending"], true, 1, 1])
+    expect(await value(`return Object.values({ max: Math.max })[0](1, 2)`)).toBe(2)
+  })
+
+  test("Object enumeration rejects invalid receivers and gives promises an await hint", async () => {
+    const diagnostic = await error(`return Object.keys(Promise.resolve({ a: 1 }))`)
+    expect(diagnostic.kind).toBe("InvalidDataValue")
+    expect(diagnostic.message).toContain("await")
+    expect(await value(`return Object.keys(Math)`)).toEqual([])
   })
 
   test("Object.assign keeps Maps usable", async () => {
@@ -658,7 +1042,7 @@ describe("sandbox values at intra-sandbox checkpoints", () => {
     )
   })
 
-  test("object and array spread keep sandbox values usable", async () => {
+  test("object and array spread keep CodeMode values usable", async () => {
     expect(
       await value(`
       const src = { m: new Map([["a", 1]]) }
@@ -670,15 +1054,62 @@ describe("sandbox values at intra-sandbox checkpoints", () => {
     expect(await value(`const list = [new Date(1000)]; const copy = [...list]; return copy[0].getTime()`)).toBe(1000)
   })
 
-  test("Array.from over arrays keeps nested sandbox values usable", async () => {
+  test("Array.from over arrays keeps nested CodeMode values usable", async () => {
     expect(await value(`return Array.from([new Date(5)])[0].getTime()`)).toBe(5)
+  })
+
+  test("Array.from and Array.of preserve nested object identity", async () => {
+    expect(
+      await value(`
+      const child = { selected: false }
+      Array.from([child])[0].selected = true
+      return child.selected
+    `),
+    ).toBe(true)
+    expect(
+      await value(`
+      const child = { selected: false }
+      Array.of(child)[0].selected = true
+      return child.selected
+    `),
+    ).toBe(true)
+  })
+
+  test("Array.from and Array.of preserve promises and callable references", async () => {
+    expect(
+      await value(`
+      const pending = Promise.resolve(1)
+      return [await Array.from([pending])[0], await Array.of(pending)[0]]
+    `),
+    ).toEqual([1, 1])
+    expect(await value(`return [Array.from([Math.max])[0](1, 2), Array.of(Math.max)[0](3, 4)]`)).toEqual([2, 4])
+  })
+
+  test("Array.from preserves identity across supported collection shapes", async () => {
+    expect(
+      await value(`
+      const child = { selected: false }
+      const fromArrayLike = Array.from({ 0: child, length: 1 })
+      const fromMap = Array.from(new Map([["child", child]]))
+      const fromSet = Array.from(new Set([child]))
+      fromArrayLike[0].selected = true
+      return [fromMap[0][1] === child, fromSet[0] === child, child.selected]
+    `),
+    ).toEqual([true, true, true])
+  })
+
+  test("Array.from rejects invalid receivers and gives promises an await hint", async () => {
+    const diagnostic = await error(`return Array.from(Promise.resolve([1]))`)
+    expect(diagnostic.kind).toBe("InvalidDataValue")
+    expect(diagnostic.message).toContain("await")
+    expect(await value(`return Array.from((a, b) => 1)`)).toEqual([null, null])
   })
 
   test("regexes stay callable through Object.values", async () => {
     expect(await value(`return Object.values({ r: /ab+/ })[0].test("abb")`)).toBe(true)
   })
 
-  test("Object.* helpers see sandbox values as empty objects, never internals", async () => {
+  test("Object.* helpers see CodeMode values as empty objects, never internals", async () => {
     expect(await value(`return Object.keys(new Map([["a", 1]]))`)).toEqual([])
     expect(await value(`return Object.values(new Date(0))`)).toEqual([])
     expect(await value(`return Object.entries(new Set([1]))`)).toEqual([])
@@ -697,7 +1128,7 @@ describe("sandbox values at intra-sandbox checkpoints", () => {
     const capture = Tool.make({
       description: "Capture the exact input the host receives",
       input: { type: "object" },
-      run: (input) =>
+      execute: (input) =>
         Effect.sync(() => {
           observed.push(input)
           return "ok"

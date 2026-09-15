@@ -1,5 +1,6 @@
-import { FileSystem } from "@opencode-ai/core/filesystem"
-import { RelativePath } from "@opencode-ai/core/schema"
+import { FileSystem } from "@opencode/core/filesystem"
+import { RelativePath } from "@opencode/core/schema"
+import { FileNotFoundError } from "@opencode/protocol/errors"
 import { Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -11,11 +12,18 @@ export const FileSystemHandler = HttpApiBuilder.group(Api, "server.fs", (handler
     return handlers
       .handleRaw("fs.read", (ctx) =>
         Effect.gen(function* () {
-          const file = yield* (yield* FileSystem.Service).read({
-            path: RelativePath.make(
-              decodeURIComponent(new URL(ctx.request.url, "http://localhost").pathname.slice(13)),
-            ),
-          })
+          const fs = yield* FileSystem.Service
+          const file = yield* fs
+            .read({
+              path: RelativePath.make(
+                decodeURIComponent(new URL(ctx.request.url, "http://localhost").pathname.slice(13)),
+              ),
+            })
+            .pipe(
+              Effect.mapError(
+                (error) => new FileNotFoundError({ path: error.path, message: `File not found: ${error.path}` }),
+              ),
+            )
           return HttpServerResponse.uint8Array(file.content, { contentType: file.mime })
         }),
       )

@@ -62,7 +62,6 @@ export namespace Workspace {
     z.object({
       name: z.string().min(1).max(255).optional(),
       region: z.array(Region).min(1).optional(),
-      allow_training: z.boolean().optional(),
     }),
     async (input) => {
       Actor.assertAdmin()
@@ -73,7 +72,6 @@ export namespace Workspace {
           .set({
             ...("name" in input ? { name: input.name } : {}),
             ...("region" in input ? { region: input.region } : {}),
-            ...("allow_training" in input ? { allow_training: input.allow_training } : {}),
           })
           .where(eq(WorkspaceTable.id, workspaceID)),
       )
@@ -104,5 +102,17 @@ export namespace Workspace {
         .set({ timeDeleted: sql`now()` })
         .where(eq(WorkspaceTable.id, Actor.workspace())),
     )
+  })
+
+  export const unblock = fn(z.string().startsWith("wrk_"), async (workspaceID) => {
+    await Database.transaction(async (tx) => {
+      const workspace = await tx
+        .select({ id: WorkspaceTable.id })
+        .from(WorkspaceTable)
+        .where(eq(WorkspaceTable.id, workspaceID))
+        .then((rows) => rows[0])
+      if (!workspace) throw new Error("Workspace not found")
+      await tx.update(WorkspaceTable).set({ is_blocked: false }).where(eq(WorkspaceTable.id, workspaceID))
+    })
   })
 }

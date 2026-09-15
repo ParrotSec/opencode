@@ -1,6 +1,6 @@
-import { Types } from "effect"
-import { Model } from "@opencode-ai/schema/model"
-import { ProviderV2 } from "./provider"
+import { Model } from "@opencode/schema/model"
+import { Provider } from "./provider.js"
+import type { DeepMutable } from "./schema.js"
 
 export const ID = Model.ID
 export type ID = typeof ID.Type
@@ -12,6 +12,12 @@ export type VariantID = typeof VariantID.Type
 export const Family = Model.Family
 export type Family = Model.Family
 
+export const ReasoningField = Model.ReasoningField
+export type ReasoningField = Model.ReasoningField
+
+export const Compatibility = Model.Compatibility
+export type Compatibility = Model.Compatibility
+
 export const Capabilities = Model.Capabilities
 export type Capabilities = Model.Capabilities
 
@@ -20,22 +26,23 @@ export const Cost = Model.Cost
 export const Ref = Model.Ref
 export type Ref = typeof Ref.Type
 
-export const Api = Model.Api
-export type Api = Model.Api
-
 export const Info = Model.Info
 export type Info = Model.Info
 
-export type MutableInfo = Omit<Types.DeepMutable<Info>, "api"> & {
-  api: ProviderV2.MutableApi<Api>
+export type MutableInfo = DeepMutable<Info>
+
+export function compatibility(input: unknown): Compatibility | undefined {
+  if (typeof input === "string") return { reasoningField: input }
+  if (typeof input !== "object" || input === null || Array.isArray(input) || !("field" in input)) return undefined
+  return typeof input.field === "string" ? { reasoningField: input.field } : undefined
 }
 
-export function parse(input: string): { providerID: ProviderV2.ID; modelID: ID } {
-  const [providerID, ...modelID] = input.split("/")
+export function parse(input: string): { providerID: Provider.ID; modelID: ID } {
+  const index = input.indexOf("/")
   return {
-    providerID: ProviderV2.ID.make(providerID),
-    modelID: ID.make(modelID.join("/")),
+    providerID: Provider.ID.make(index === -1 ? input : input.slice(0, index)),
+    modelID: ID.make(index === -1 ? "" : input.slice(index + 1)),
   }
 }
 
-export * as ModelV2 from "./model"
+export * as Model from "./model.js"

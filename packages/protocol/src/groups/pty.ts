@@ -1,10 +1,10 @@
-import { Pty } from "@opencode-ai/schema/pty"
-import { PtyTicket } from "@opencode-ai/schema/pty-ticket"
-import { Location } from "@opencode-ai/schema/location"
+import { Pty } from "@opencode/schema/pty"
+import { PtyTicket } from "@opencode/schema/pty-ticket"
+import { Location } from "@opencode/schema/location"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
-import { ForbiddenError, PtyNotFoundError } from "../errors"
-import { LocationQuery, locationQueryOpenApi } from "./location"
+import { ForbiddenError, PtyNotFoundError } from "../errors.js"
+import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 export const PTY_CONNECT_TICKET_QUERY = "ticket"
 export const PTY_CONNECT_TOKEN_HEADER = "x-opencode-ticket"
@@ -101,13 +101,14 @@ export const PtyGroup = HttpApiGroup.make("server.pty")
     HttpApiEndpoint.post("pty.connectToken", "/api/pty/:ptyID/connect-token", {
       params: { ptyID: Pty.ID },
       query: LocationQuery,
+      headers: Schema.Struct({ [PTY_CONNECT_TOKEN_HEADER]: Schema.optional(Schema.String) }),
       success: Location.response(PtyTicket.ConnectToken),
       error: [ForbiddenError, PtyNotFoundError],
     })
       .annotateMerge(locationQueryOpenApi)
       .annotateMerge(
         OpenApi.annotations({
-          identifier: "v2.pty.connectToken",
+          identifier: "v2.pty.connect.token",
           summary: "Create PTY WebSocket token",
           description: "Create a short-lived single-use ticket for opening a PTY WebSocket connection.",
         }),
