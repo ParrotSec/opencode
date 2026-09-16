@@ -587,12 +587,12 @@ async function mockServer(page: Page) {
       return json(route, { location: { directory: sessionA.directory }, data: [] })
     if (url.pathname === "/api/model/default")
       return json(route, { location: { directory: sessionA.directory }, data: null })
-    if (url.pathname === "/api/permission/request" || url.pathname === "/api/form/request")
+    if (url.pathname === "/api/permission/request" || url.pathname === "/api/form")
       return json(route, { location: { directory: sessionA.directory }, data: [] })
     if (url.pathname === "/api/mcp") return json(route, { location: { directory: sessionA.directory }, data: [] })
     if (url.pathname === "/api/mcp/resource")
       return json(route, { location: { directory: sessionA.directory }, data: { resources: [], templates: [] } })
-    if (url.pathname === "/api/project" || url.pathname === "/api/project/current") {
+    if (url.pathname === "/api/project") {
       const project = {
         id: sessionA.projectID,
         canonical: sessionA.directory,
@@ -600,10 +600,7 @@ async function mockServer(page: Page) {
         time: { created: 1, updated: 1 },
         sandboxes: [],
       }
-      return json(
-        route,
-        url.pathname === "/api/project" ? [project] : { id: project.id, directory: sessionA.directory },
-      )
+      return json(route, [project])
     }
     if (url.pathname === "/api/location")
       return json(route, {

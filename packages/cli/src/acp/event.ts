@@ -165,7 +165,7 @@ export async function streamTurn(input: {
         continue
       }
       if (event.type === "form.created" && (event.data.form.sessionID === input.sessionID || child)) {
-        await input.client.form
+        await input.client.session.form
           .cancel({ sessionID: event.data.form.sessionID, formID: event.data.form.id })
           .catch(() => input.client.session.interrupt({ sessionID: event.data.form.sessionID }).catch(() => {}))
         continue
@@ -369,7 +369,7 @@ export async function streamTurn(input: {
     }
     const assistant = assistantMessageID
       ? await input.client.session
-          .message({ sessionID: input.sessionID, messageID: assistantMessageID })
+          .message.get({ sessionID: input.sessionID, messageID: assistantMessageID })
           .catch(() => undefined)
       : undefined
     return response(

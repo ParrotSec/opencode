@@ -19,13 +19,26 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
       TypeScript is transpiled first; the emitted JavaScript must still use the supported subset.
 - [x] Top-level `await` and `return` through the program's implicit async-function scope.
 - [x] Explicit `return`, final top-level expression as a REPL-style result, and `null` when no value is produced.
-- [x] Program results use JSON-like boundaries, with `undefined` and non-finite numbers normalized to `null`. Tool
-      arguments follow JSON serialization semantics before their schema applies (see the tools section).
-- [x] Live Date, RegExp, Map, Set, URL, and URLSearchParams values inside CodeMode.
+- [x] The host boundary is `JSON.stringify` plus a short table. The program result and tool arguments cross as
+      what `JSON.stringify` would serialize: `toJSON` is honored, functions and `undefined` properties vanish,
+      `undefined` array elements and non-finite numbers become `null`, a cyclic value throws the same `TypeError`,
+      and Map, RegExp, and generators serialize as `{}`. A bare `undefined` result is `null`.
+      Tool results come back the way `JSON.parse(JSON.stringify(result))` would. The table, where a value cannot
+      be JSON but what the program meant is clear: a promise is awaited (a rejection fails the program), a Set
+      crosses as an array, a URLSearchParams as its query string, an Error as `{ name, message, ...own }`, a
+      Uint8Array is rejected with a hint to encode as text, and own `__proto__` keys are dropped so merging tool
+      inputs or results cannot replace a prototype. In-program `JSON.stringify` keeps JS behavior except for the
+      Error form and a promise, which is a `TypeError` with an await hint rather than a silent `{}`.
+- [x] Live Date, RegExp, Map, Set, URL, URLSearchParams, and Uint8Array values inside CodeMode.
 - [x] Tool calls through the host-provided `tools` tree only.
 - [x] The global `search(...)` built-in: synchronous tool discovery that counts as an admitted tool call and is
       shadowable by program declarations like other globals.
 - [x] Cooperative timeout, an optional total tool-call limit, output bounding, and unrestricted tool-call concurrency.
+- [x] The timeout fires between interpreter steps, so one built-in is bounded in what it may build: strings up to
+      2^24 characters (`repeat`, `pad*`, `concat`, `join`, `+`, template literals, `JSON.stringify`), arrays up to
+      10,000,000 elements (`Array(n)`, `length =`, `Array.from`, `split`, `matchAll`, `concat`, `flat`; below the JS
+      maximum of 2^32 - 1), and 10,000 pending promises at once. Exceeding one throws a `RangeError`. A single regular
+      expression match can still run long on a pathological pattern; the host regex engine has no interrupt hook.
 - [ ] Strict-mode early errors: duplicate parameter names, `yield` as an identifier, and a trailing comma after a
       rest parameter are accepted unless the program itself begins with `"use strict"`.
 - [ ] Valid JavaScript rejected by TypeScript transpilation before interpretation, such as `in` inside a destructuring
@@ -100,6 +113,10 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
 - [x] Function declarations, function expressions, and arrow functions.
 - [x] Synchronous and `async` functions.
 - [x] Closures, recursion, default parameters, rest parameters, and destructured parameters.
+- [x] A call depth limit of 10000: deeper nesting throws a catchable `RangeError: Maximum call stack size exceeded`
+      at the overflowing call instead of running until the timeout. Callbacks invoked by built-ins count below the
+      call that invoked the built-in, and a resumed `await` starts from depth 0 as in JS, so long async chains such
+      as recursive pagination are unaffected.
 - [x] Expression and block function bodies.
 - [x] User callbacks for the supported Array, Map, Set, URLSearchParams, sort, string-replacement, and `Array.from`
       mapper APIs, with one shared acceptance rule everywhere including promise reactions.
@@ -175,7 +192,7 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
 - [x] Prefix and postfix `++` and `--`.
 - [x] Plain, arithmetic, bitwise, and logical assignment operators.
 - [x] Property deletion on plain data objects and arrays, including computed and optional forms; deleting an array index
-      creates a hole without changing its length. Deleting a non-configurable property (`length`, `lastIndex`) or
+      creates a hole without changing its length. Deleting a non-configurable property (`length`) or
       assigning a read-only one (`Math.PI`, `fn.name`) throws a `TypeError`, as in strict mode.
 - [ ] Operators, `switch` discriminants, template interpolation, and coercion helpers such as `String` and `isNaN`
       applied to functions and namespaces; JavaScript coerces them, the interpreter rejects non-data operands.
@@ -216,8 +233,8 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
       callables that settle the promise exactly once (they may escape the executor and settle later); an executor
       throw rejects unless the promise already settled, resolving with a promise or callable thenable adopts it, and
       resolving with the promise itself rejects with a `TypeError`. Resolver callables work anywhere callbacks are
-      accepted, including `.then`/`.catch` handlers and collection callbacks, but remain opaque references that cannot
-      cross the data boundary.
+      accepted, including `.then`/`.catch` handlers and collection callbacks, and vanish at the data boundary like
+      any function.
 - [x] Recursive assimilation of objects with an own callable `then` field across `Promise.resolve`, combinators,
       constructors, reactions, `finally`, `await`, and async returns. Thenable methods run deferred, receive
       first-call-wins resolve/reject functions, and ignore throws after settlement. Inherited/accessor `then` fields
@@ -225,11 +242,9 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
 - [x] Dotted tool names are canonicalized into namespace paths; a path can be both callable and a namespace, and the
       last tool supplied for a canonical path wins.
 - [x] Tool path segments may be named `constructor`, `prototype`, or `__proto__` because paths use inert Map keys.
-- [x] Outbound tool arguments follow JSON serialization semantics, like `JSON.stringify`: object properties with
-      `undefined` values are dropped, `undefined` array elements and non-finite numbers become `null`, and sparse
-      arrays densify. Tools never receive `undefined` inside their input object, though a bare `tools.t(undefined)`
-      argument still reaches schema decoding as `undefined`. Program results keep the stricter
-      normalization where every `undefined` becomes `null`.
+- [x] Outbound tool arguments are what `JSON.stringify` would serialize (see the boundary rule above). Tools never
+      receive `undefined` inside their input object, though a bare `tools.t(undefined)` argument still reaches schema
+      decoding as `undefined`.
 - [ ] Tokenize and case-fold non-ASCII tool paths, descriptions, and queries for tool search.
 
 ## Objects and properties
@@ -379,7 +394,9 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
       `unicodeSets`, and `dotAll`.
 - [x] Captures, named groups, match `.index` and `.input`, and stateful global matching.
 - [x] Integration with supported String methods, including function replacers.
-- [x] Writable `lastIndex`.
+- [x] Writable `lastIndex`, shared by `exec`, `test`, and the String methods. It is a prototype accessor that stores
+      a number, so `re.lastIndex = "12"` reads back `12`, `delete` is a no-op, and `hasOwnProperty("lastIndex")` is
+      `false`.
 - [x] Match `indices` metadata for the `d` flag, including named groups on `exec`, `match`, and `matchAll` results.
 - [x] `RegExp.escape`.
 
@@ -409,13 +426,55 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
       `entries`, `toString`, and `size`.
 - [x] URL values serialize to their href; URLSearchParams serialize to `{}`.
 
+## Uint8Array
+
+The only binary type. Bytes stay inside the program or cross to extensions as copies; the tool boundary rejects them
+with a hint to encode as text first (`TextDecoder`, `toBase64`, `toHex`).
+
+- [x] `new Uint8Array(length | array | iterable | Uint8Array)`, `Uint8Array.from`, `Uint8Array.of`, `fromBase64`,
+      and `fromHex`. Lengths are capped like arrays.
+- [x] Index reads and writes with JS byte semantics: values wrap modulo 256, out-of-range writes are ignored, indexes
+      cannot be deleted. `length` is a prototype accessor, so `Object.keys` lists only indexes.
+- [x] `at`, `slice`, `subarray` (a view on the same bytes), `set`, `fill`, `reverse`, `indexOf`, `lastIndexOf`,
+      `includes`, `join`, `toString`, `toBase64`, `toHex`, and materialized `keys`, `values`, and `entries` arrays.
+- [x] Spread, destructuring, `for...of`, `yield*`, `Array.from`, and `new Set(bytes)`. `Array.isArray` is false.
+- [x] String coercion joins with commas; `JSON.stringify` gives `{"0":1,...}`; `console.log` prints
+      `Uint8Array(n) [...]`.
+- [ ] Callback methods (`forEach`, `map`, `filter`, `find`, `reduce`, ...); use `Array.from(bytes, fn)` meanwhile.
+- [ ] `ArrayBuffer`, `DataView`, and other typed arrays.
+
 ## Web platform helpers
 
 - [x] `atob` and `btoa` with forgiving-base64 decoding and WebIDL string conversion; invalid input throws a
       `TypeError`, since there is no `DOMException`.
-- [x] `crypto.randomUUID()`.
-- [ ] `crypto.getRandomValues` and `crypto.subtle`, `TextEncoder`/`TextDecoder`, and `Blob`: these need a binary
-      value type, which the JSON-like data model does not have yet.
+- [x] `crypto.randomUUID()` and `crypto.getRandomValues(uint8Array)`.
+- [x] `TextEncoder` and `TextDecoder` for UTF-8 only: any other label is a `RangeError`. `TextDecoder` accepts the
+      `fatal` and `ignoreBOM` options; `decode` takes a Uint8Array or nothing.
+- [ ] `crypto.subtle`, `Blob`, and `TextDecoder` streaming or non-UTF-8 encodings.
+
+## Extensions
+
+Host functions a host opts in through `Extension.make({ name, globals })` and `CodeMode.make({ extensions })`.
+Nothing is exposed unless a host provides it; extension calls are not tool calls.
+
+- [x] Each global is a function, callable but not constructible, run with `this` undefined. A global that shadows
+      a built-in or another extension throws at `make`.
+- [x] Every value crossing in either direction is converted, never shared: plain objects and arrays are copied,
+      `Date`, `RegExp`, `URL`, `URLSearchParams`, `Map`, `Set`, and `Uint8Array` become fresh copies with their
+      contents converted (a host `ArrayBuffer` comes in as a `Uint8Array`; other typed arrays cannot come out),
+      errors cross as errors with their name and message, and a `__proto__` key is dropped. Functions, generators,
+      un-awaited promises, and symbols cannot be passed in; a class instance, a symbol, or a BigInt cannot come out.
+- [x] A host function inside a result becomes a program function whose calls cross the same way, so a result can
+      carry methods (`res.json()`) whose host closures keep the host state. Diagnostics name it by its path
+      (`fetch.json`). Like any program function it vanishes at the data boundary.
+- [x] Each call to an extension global runs inside the host's `extension.before`/`extension.after` hooks as
+      `{ extension, name, args }`, with the host's own error on failure; calls to functions inside results do not.
+- [x] A host `Promise` becomes a program promise. Whatever host code returns, resolves, throws, or rejects with
+      crosses the same way, so `catch (e)` receives a copy of the thrown value (an `Error` of the matching type, or
+      plain data).
+- [ ] Program functions as arguments to extension code (callbacks such as `forEach`).
+- [ ] Host classes. Stateful host objects are expressed as closures; a declared method table would be the next
+      step if `new X()` in a program is ever needed.
 
 ## Errors and diagnostics
 
@@ -440,3 +499,12 @@ ultimate source of truth. Upstream test262 files run verbatim from `test/test262
 - [x] Failures raised by the interpreter are `TypeError`s unless JavaScript names them otherwise (`RangeError`,
       `ReferenceError`, `SyntaxError`, `URIError`), so `e instanceof TypeError` and `e.constructor === TypeError`
       hold. Unsupported syntax reached at runtime is a `SyntaxError`; awaited tool failures stay plain `Error`.
+      Host errors escaping a built-in (`(1).toFixed(200)`) become the same-named program error at the call.
+      A failure raised inside a promise a built-in created (`Promise.all(1)`, `Promise.race([])`, a resolution cycle)
+      is located at the call that created the promise.
+- [x] One failure is one error object: every `catch`, rejection handler, and `allSettled` reason for the same
+      failure sees the identical value, so `a === b` holds after awaiting the same rejected promise twice.
+- [x] Rethrowing an interpreter failure keeps its diagnostic: `catch (e) { throw e }` still reports the original
+      kind and source location. Uncaught errors report as `name: message` whoever raised them, as
+      `Error.prototype.toString` would (`TypeError: Cannot read properties of null (reading 'foo').`,
+      `TypeError: bad input`); other thrown values report as `Uncaught: <value>`.
