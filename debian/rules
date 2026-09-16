@@ -25,6 +25,14 @@
 # (the `web` command was replaced by `serve` in upstream 2.x).
 # The terminal TUI and all regular CLI commands remain available through
 # /usr/bin/opencode.
+#
+# The web UI build (a large vite build, then a synchronous brotli-11
+# compression of the archive) and Bun's bytecode compilation are silent for
+# long stretches, which looks like a hung build to inactivity watchdogs on
+# slow (arm64) workers. override_dh_auto_build therefore emits a heartbeat
+# line (with load and memory readings) every 10 minutes while it runs:
+# it keeps the log alive for the watchdog and distinguishes CPU-bound
+# builds from memory-starved ones.
 
 export DH_VERBOSE = 1
 # sbuild sets HOME=/sbuild-nonexistent (unwritable); bun needs a writable HOME
@@ -88,6 +96,11 @@ override_dh_auto_build:
 	set -e; \
 	mkdir -p $(CURDIR)/debian/fakehome; \
 	export PATH="$(BUN_HOME)/bun:$$PATH"; \
+	( while :; do sleep 600; \
+		echo "==> [heartbeat] still building (load $$(cut -d' ' -f1-3 /proc/loadavg), mem avail $$(awk '/^MemAvailable/ {printf \"%dMB\", $$2/1024}' /proc/meminfo))"; \
+	  done ) & \
+	HEARTBEAT_PID=$$!; \
+	trap 'kill $$HEARTBEAT_PID 2>/dev/null || true' EXIT; \
 	echo "==> bun install --frozen-lockfile (deps pinned by bun.lock; fail"; \
 	echo "    loudly if the lockfile ever drifts; lifecycle scripts skipped:"; \
 	echo "    native modules ship prebuilt binaries and need no node-gyp)"; \
@@ -95,7 +108,8 @@ override_dh_auto_build:
 	echo "==> building $(DIST_NAME) (single target with embedded web UI)"; \
 	cd packages/cli; \
 	OPENCODE_VERSION=$(UPSTREAM_VERSION) \
-		bun run script/build.ts --single --skip-install
+		bun run script/build.ts --single --skip-install; \
+	kill $$HEARTBEAT_PID 2>/dev/null || true
 
 # ----------------------------------------------------------------------------
 # Test: the staged executable is smoke-tested in the dh_strip sequence

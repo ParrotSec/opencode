@@ -1,3 +1,9 @@
+opencode (2.0.3-0parrot4) echo; urgency=medium
+
+  * Emit a build heartbeat every 10 minutes during the Bun build.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Thu, 17 Sep 2026 00:55:21 +0200
+
 opencode (2.0.3-0parrot3) echo; urgency=medium
 
   * Rebuild package.
