@@ -10,3 +10,6 @@ tar-ignore = "debian/fakehome"
 # Upstream build output (embedded web UI vite build + compiled CLI) if a
 # binary build already ran in this tree.
 extend-diff-ignore = "packages/(app|cli)/dist(/|$)"
+# The models.dev catalog snapshot is refreshed at build time (see
+# debian/rules); keep that change out of any regenerated source diff.
+extend-diff-ignore = "packages/core/src/models-dev/snapshot\.txt"

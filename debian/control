@@ -30,9 +30,10 @@ Description: open source AI coding agent for the terminal
  available by running `opencode` from a terminal.
  .
  Build note: opencode is built from source with Bun (not packaged in
- Debian). The Bun toolchain and the npm dependencies (pinned by the
- upstream bun.lock) are fetched from the network at build time, so the
- build requires a network-enabled build worker and will not run on an
- offline buildd. The models.dev provider catalog is no longer fetched
- at build time (upstream 2.x ships it as a committed snapshot in the
- source; the program refreshes it at runtime).
+ Debian). The Bun toolchain, the npm dependencies (pinned by the upstream
+ bun.lock) and the models.dev provider catalog snapshot (upstream ships it
+ as a committed file; the build refreshes it best-effort) are fetched from
+ the network at build time, so the build requires a network-enabled build
+ worker and will not run on an offline buildd. The program also refreshes
+ the catalog live at runtime, so users on networked machines always see
+ the current model list.

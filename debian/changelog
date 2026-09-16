@@ -1,3 +1,19 @@
+opencode (2.0.5-0parrot1) echo; urgency=medium
+
+  * New upstream version 2.0.5.
+  * Refresh the bundled models.dev provider catalog snapshot
+    (packages/core/src/models-dev/snapshot.txt) at build time with
+    upstream's own update-models-snapshot.ts: the snapshot committed in
+    the release tarball lagged the live catalog by 35 providers and
+    1184 models, and the binary only refreshes it live at runtime, so
+    offline and first-run users started from a stale model list. The
+    refresh is best-effort (a failed fetch keeps the upstream snapshot
+    and prints a warning) and honours the OPENCODE_MODELS_URL override.
+    The refreshed snapshot is a build artifact: debian/source/options
+    keeps it out of regenerated source diffs.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Thu, 17 Sep 2026 01:03:26 +0200
+
 opencode (2.0.3-0parrot4) echo; urgency=medium
 
   * Emit a build heartbeat every 10 minutes during the Bun build.

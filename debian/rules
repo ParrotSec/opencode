@@ -15,11 +15,17 @@
 #      `bun run script/build.ts --single --skip-install` in packages/cli
 #      (upstream 2.x monorepo layout; the web UI is embedded by default).
 #
-# The Bun toolchain and the npm dependencies are fetched from the network at
-# build time: this package REQUIRES a network-enabled build worker and will
-# not build on an offline buildd. (Upstream 2.x no longer fetches the
-# models.dev catalog at build time; it ships as a committed snapshot in
-# packages/core/src/models-dev/snapshot.txt and is refreshed at runtime.)
+# The Bun toolchain, the npm dependencies and the models.dev provider catalog
+# are fetched from the network at build time: this package REQUIRES a
+# network-enabled build worker and will not build on an offline buildd.
+#
+# Upstream 2.x ships the models.dev catalog as a committed snapshot
+# (packages/core/src/models-dev/snapshot.txt) that may lag behind the live
+# catalog by weeks. The build refreshes it best-effort with upstream's own
+# update-models-snapshot.ts script (OPENCODE_MODELS_URL can override the
+# source) so offline/first-run users start from a current model list.
+# The binary also refreshes the catalog live at runtime, so a failed
+# refresh only means an older floor, never a stale user experience.
 #
 # Build and embed the web UI so the desktop launcher can start `opencode serve`
 # (the `web` command was replaced by `serve` in upstream 2.x).
@@ -101,6 +107,9 @@ override_dh_auto_build:
 	  done ) & \
 	HEARTBEAT_PID=$$!; \
 	trap 'kill $$HEARTBEAT_PID 2>/dev/null || true' EXIT; \
+	echo "==> refreshing the bundled models.dev catalog snapshot (best-effort)"; \
+	bun run --cwd packages/core script/update-models-snapshot.ts \
+		|| echo "==> WARNING: models.dev refresh failed; keeping the upstream snapshot"; \
 	echo "==> bun install --frozen-lockfile (deps pinned by bun.lock; fail"; \
 	echo "    loudly if the lockfile ever drifts; lifecycle scripts skipped:"; \
 	echo "    native modules ship prebuilt binaries and need no node-gyp)"; \
