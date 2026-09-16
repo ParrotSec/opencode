@@ -130,6 +130,7 @@ const rpcFromEffect = Effect.fn("Plugin.Rpc.fromEffect")(function* (host: HostRp
                 try: (signal) => {
                   // SAFETY: Promise RPC handlers return Promise values before this adapter erases their concrete types.
                   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+                  // oxlint-disable-next-line no-restricted-globals -- The portable RPC registry intentionally erases each handler's concrete signature.
                   return Reflect.apply(handler, undefined, [
                     input,
                     {
@@ -302,18 +303,6 @@ export function fromPromise(plugin: Plugin) {
                 host.aisdk.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))), options),
               ),
           },
-          catalog: {
-            provider: {
-              list: adaptApiMethod(ProviderEndpoints["provider.list"], host.catalog.provider.list),
-              get: adaptApiMethod(ProviderEndpoints["provider.get"], host.catalog.provider.get),
-            },
-            model: {
-              list: adaptApiMethod(ModelEndpoints["model.list"], host.catalog.model.list),
-              default: adaptApiMethod(ModelEndpoints["model.default"], host.catalog.model.default),
-            },
-            transform: transform(host.catalog),
-            reload: () => run(host.catalog.reload()),
-          },
           command: {
             list: adaptApiMethod(CommandEndpoints["command.list"], host.command.list),
             transform: (callback) =>
@@ -348,6 +337,18 @@ export function fromPromise(plugin: Plugin) {
           },
           generate: {
             text: adaptApiMethod(GenerateEndpoints["generate.text"], host.generate.text),
+          },
+          model: {
+            list: adaptApiMethod(ModelEndpoints["model.list"], host.model.list),
+            default: adaptApiMethod(ModelEndpoints["model.default"], host.model.default),
+            transform: transform(host.model),
+            reload: () => run(host.model.reload()),
+          },
+          provider: {
+            list: adaptApiMethod(ProviderEndpoints["provider.list"], host.provider.list),
+            get: adaptApiMethod(ProviderEndpoints["provider.get"], host.provider.get),
+            transform: transform(host.provider),
+            reload: () => run(host.provider.reload()),
           },
           integration: {
             list: adaptApiMethod(IntegrationEndpoints["integration.list"], host.integration.list),
@@ -438,7 +439,6 @@ export function fromPromise(plugin: Plugin) {
             list: adaptApiMethod(PermissionEndpoints["session.permission.list"], host.permission.list),
             get: adaptApiMethod(PermissionEndpoints["session.permission.get"], host.permission.get),
             reply: adaptApiMethod(PermissionEndpoints["session.permission.reply"], host.permission.reply),
-            rules: adaptApiMethod(PermissionEndpoints["session.permission.rules"], host.permission.rules),
           },
           plugin: {
             list: adaptApiMethod(PluginEndpoints["plugin.list"], host.plugin.list),
@@ -501,7 +501,9 @@ export function fromPromise(plugin: Plugin) {
           vcs: {
             get: adaptApiMethod(VcsEndpoints["vcs.get"], host.vcs.get),
             base: adaptApiMethod(VcsEndpoints["vcs.base"], host.vcs.base),
-            branches: adaptApiMethod(VcsEndpoints["vcs.branches"], host.vcs.branches),
+            branch: {
+              list: adaptApiMethod(VcsEndpoints["vcs.branch.list"], host.vcs.branch.list),
+            },
             status: adaptApiMethod(VcsEndpoints["vcs.status"], host.vcs.status),
             diff: adaptApiMethod(VcsEndpoints["vcs.diff"], host.vcs.diff),
             reload: () => run(host.vcs.reload()),
@@ -580,7 +582,7 @@ export function fromPromise(plugin: Plugin) {
             command: adaptApiMethod(SessionEndpoints["session.command"], host.session.command),
             synthetic: adaptApiMethod(SessionEndpoints["session.synthetic"], host.session.synthetic),
             interrupt: adaptApiMethod(SessionEndpoints["session.interrupt"], host.session.interrupt),
-            rename: adaptApiMethod(SessionEndpoints["session.rename"], host.session.rename),
+            update: adaptApiMethod(SessionEndpoints["session.update"], host.session.update),
             move: adaptApiMethod(SessionEndpoints["session.move"], host.session.move),
             wait: adaptApiMethod(SessionEndpoints["session.wait"], host.session.wait),
             context: adaptApiMethod(SessionEndpoints["session.context"], host.session.context),

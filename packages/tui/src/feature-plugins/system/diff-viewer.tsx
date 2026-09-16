@@ -102,7 +102,7 @@ function DiffViewer(props: { context: Plugin.Context }) {
         : props.context.data.location.default()
     },
     undefined,
-    { equals: (a, b) => a.directory === b.directory && a.workspaceID === b.workspaceID },
+    { equals: (a, b) => a.directory === b.directory },
   )
   const baseKey = createMemo(() =>
     JSON.stringify([locationKey(location()), props.context.data.location.vcs.info(location())?.branch.current]),
@@ -217,7 +217,7 @@ function DiffBaseDialog(props: {
   const theme = props.context.theme.contextual.elevated
   const [search, setSearch] = createDebouncedSignal("", 150)
   const [branches] = createResource(search, (search) =>
-    props.context.client.vcs.branches({ location: props.location, search, limit: 100 }),
+    props.context.client.vcs.branch.list({ location: props.location, search, limit: 100 }),
   )
   const Empty = () => (
     <box paddingLeft={4} paddingRight={4}>

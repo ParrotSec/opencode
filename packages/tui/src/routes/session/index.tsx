@@ -40,11 +40,15 @@ import { Locale } from "../../util/locale"
 import { FilePath } from "../../ui/file-path"
 import {
   canonicalToolName,
+  executeCalls,
+  executeCallSummary,
   finiteNumber,
   primitiveInputSummary,
   toolDisplayContent,
   toolDisplayMetadata,
+  type ExecuteCall,
 } from "../../util/tool-display"
+import { DialogExecute } from "./dialog-execute"
 import { RetryProvider } from "../../component/retry-provider"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useClient } from "../../context/client"
@@ -77,7 +81,7 @@ import { useConfig } from "../../config"
 import { useClipboard } from "../../context/clipboard"
 import { nextThinkingMode, reasoningSummary, type ThinkingMode } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
-import { collapseToolOutput } from "../../util/collapse-tool-output"
+import { collapseShellOutput, collapseToolOutput } from "../../util/collapse-tool-output"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { useLocation } from "../../context/location"
@@ -86,6 +90,7 @@ import { usePlugin } from "../../plugin/context"
 import {
   cacheReuseDrop,
   createSessionRows,
+  legacyTurns,
   messageBoundaryIDs,
   resolvePart,
   sessionRowID,
@@ -153,6 +158,7 @@ export function Session(props: {
   const session = createMemo(() => data.session.get(route.sessionID))
   const messages = () => data.session.message.list(route.sessionID)
   const messageIndexes = createMemo(() => new Map(messages().map((message, index) => [message.id, index])))
+  const legacy = createMemo(() => legacyTurns(messages()))
   const messagesBeforeRevert = () => {
     const messageID = session()?.revert?.messageID
     if (!messageID) return messages()
@@ -242,7 +248,7 @@ export function Session(props: {
       void data.session.permission
         .reply({
           sessionID: request.sessionID,
-          reply: "once",
+          decision: "once",
           requestID: request.id,
         })
         .catch((error) => {
@@ -543,9 +549,9 @@ export function Session(props: {
     const result = await runPendingAction(inboxID, async () => {
       const request =
         action === "steer"
-          ? client.api.session.inbox.steer({ sessionID: route.sessionID, inboxID })
+          ? client.api.session.inbox.update({ sessionID: route.sessionID, inboxID, delivery: "steer" })
           : action === "queue"
-            ? client.api.session.inbox.queue({ sessionID: route.sessionID, inboxID })
+            ? client.api.session.inbox.update({ sessionID: route.sessionID, inboxID, delivery: "queue" })
             : client.api.session.inbox.cancel({ sessionID: route.sessionID, inboxID })
       const error = await request.then(
         () => undefined,
@@ -819,7 +825,7 @@ export function Session(props: {
         const title = input.trim()
         void (
           title
-            ? client.api.session.rename({ sessionID: route.sessionID, title })
+            ? client.api.session.update({ sessionID: route.sessionID, title })
             : data.session.title.generate(route.sessionID)
         ).catch((error) => toast.error(error))
       },
@@ -1256,6 +1262,7 @@ export function Session(props: {
         diffWrapMode,
         models,
         messageIndex: (messageID) => messageIndexes().get(messageID),
+        legacyTurns: legacy,
         config,
         mutatePending,
         pendingDelivery: (inboxID) => pendingDeliveries().get(inboxID),
@@ -1382,8 +1389,7 @@ export function Session(props: {
                 <Match
                   when={
                     session() &&
-                    currentLocation.error?.location.directory === session()!.location.directory &&
-                    currentLocation.error?.location.workspaceID === session()!.location.workspaceID
+                    currentLocation.error?.location.directory === session()!.location.directory
                   }
                 >
                   <SessionLocationMissing
@@ -1938,9 +1944,11 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
         ?.name ?? `${props.message.model.providerID}/${props.message.model.id}`,
   )
   const messages = createMemo(() => data.session.message.list(ctx.sessionID))
-  const duration = createMemo(() => turnDuration(props.message, messages(), ctx.messageIndex(props.message.id)))
+  const duration = createMemo(() =>
+    turnDuration(props.message, messages(), ctx.messageIndex(props.message.id), ctx.legacyTurns()),
+  )
   const tokensPerSecond = createMemo(() =>
-    turnTokensPerSecond(props.message, messages(), ctx.messageIndex(props.message.id)),
+    turnTokensPerSecond(props.message, messages(), ctx.messageIndex(props.message.id), ctx.legacyTurns()),
   )
   const interrupted = createMemo(() => props.message.error?.message === "Step interrupted")
   return (
@@ -2911,7 +2919,7 @@ function ShellDisplay(props: {
           id,
           cursor,
           limit: SHELL_DISPLAY_LIMIT,
-          location: location ? { directory: location.directory, workspace: location.workspaceID } : undefined,
+          location: location ? { directory: location.directory } : undefined,
         })
         .catch(() => undefined)
       if (!response) break
@@ -2961,17 +2969,12 @@ function ShellDisplay(props: {
     return stripAnsi(props.output?.trim() ?? "")
   })
   const maxLines = 10
-  const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
+  const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6 - (isRunning() ? 2 : 0)))
   const prefix = createMemo(() => (workdir() && workdir() !== "." ? `cd ${workdir()} && ` : ""))
   const input = createMemo(() => (props.command ? `${isRunning() ? "" : "$ "}${prefix()}${props.command}` : ""))
-  const content = createMemo(() => [input(), output()].filter(Boolean).join("\n\n"))
-  const collapsed = createMemo(() => collapseToolOutput(content(), maxLines, maxChars()))
-  const limited = createMemo(() => {
-    if (expanded() || !collapsed().overflow) return content()
-    return collapsed().output
-  })
-  const limitedInput = createMemo(() => limited().slice(0, input().length))
-  const limitedOutput = createMemo(() => limited().slice(Math.min(limited().length, input().length + 2)))
+  const collapsed = createMemo(() => collapseShellOutput(input(), output(), maxLines, maxChars()))
+  const limitedInput = createMemo(() => (expanded() ? input() : collapsed().input))
+  const limitedOutput = createMemo(() => (expanded() ? output() : collapsed().output))
   const expandable = createMemo(() => Boolean(props.shellID) || collapsed().overflow)
   const toggle = () => {
     const next = !expanded()
@@ -2992,8 +2995,30 @@ function ShellDisplay(props: {
             )
           }
         >
-          <Show when={isRunning()} fallback={<text fg={theme.text.default}>{limitedInput()}</text>}>
-            <Spinner color={color()}>{limitedInput()}</Spinner>
+          <Show
+            when={isRunning()}
+            fallback={
+              <text
+                fg={theme.text.default}
+                wrapMode={expanded() ? "word" : "char"}
+                maxHeight={expanded() ? undefined : 2}
+              >
+                {limitedInput()}
+              </text>
+            }
+          >
+            <box flexDirection="row" gap={1}>
+              <Spinner color={color()} />
+              <text
+                fg={color()}
+                wrapMode={expanded() ? "word" : "char"}
+                maxHeight={expanded() ? undefined : 2}
+                flexGrow={1}
+                minWidth={0}
+              >
+                {limitedInput()}
+              </text>
+            </box>
           </Show>
           <Show when={limitedOutput()}>
             <text fg={theme.text.subdued}>{limitedOutput()}</text>
@@ -3179,23 +3204,7 @@ export function isBackgroundSubagent(
   return status === "completed" && metadata.status === "running"
 }
 
-type ExecuteCall = { tool: string; status: "running" | "completed" | "error"; input?: Record<string, unknown> }
-
-function executeCalls(value: unknown): ExecuteCall[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((call) => {
-    const item = recordValue(call)
-    const tool = stringValue(item?.tool)
-    const status = stringValue(item?.status)
-    if (!tool || !status || !["running", "completed", "error"].includes(status)) return []
-    return [{ tool, status: status as ExecuteCall["status"], input: recordValue(item?.input) }]
-  })
-}
-
-export function executeCallSummary(call: ExecuteCall) {
-  const args = primitiveInputSummary(call.input ?? {}).replace(/\s+/g, " ")
-  return `${call.tool}${args ? ` ${args}` : ""}`
-}
+export { executeCallSummary }
 
 function ExecuteCallView(props: { call: Accessor<ExecuteCall> }) {
   const theme = useTheme()
@@ -3253,6 +3262,7 @@ function ExecuteCallView(props: { call: Accessor<ExecuteCall> }) {
 function Execute(props: ToolProps) {
   const ctx = use()
   const theme = useTheme()
+  const dialog = useDialog()
   const isLoading = createMemo(() => props.part.state.status === "streaming" || props.part.state.status === "running")
   const calls = createMemo(() => executeCalls(props.metadata.toolCalls))
   const output = createMemo(() => stripAnsi(props.output?.trim() ?? ""))
@@ -3269,6 +3279,7 @@ function Execute(props: ToolProps) {
         pending="execute"
         complete={true}
         part={props.part}
+        onClick={() => dialog.replace(() => <DialogExecute part={props.part} />)}
       >
         execute
       </InlineTool>

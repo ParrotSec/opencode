@@ -93,6 +93,7 @@ export const dict = {
   "command.session.previous.unseen": "Previous unread session",
   "command.session.next.unseen": "Next unread session",
   "command.session.archive": "Archive session",
+  "command.session.location.cycle": "Cycle session location",
 
   "command.palette": "Command palette",
 
@@ -576,7 +577,7 @@ export const dict = {
   "context.stats.lastActivity": "Last Activity",
 
   "context.usage.tokens": "Tokens",
-  "context.usage.usage": "Context Usage",
+  "context.usage.usage": "Context",
   "context.usage.cost": "Cost",
   "context.usage.clickToView": "Click to view context",
   "context.usage.view": "View context usage",
@@ -773,8 +774,8 @@ export const dict = {
   "session.queue.steerTooltip": "Send without interrupting",
   "session.queue.remove": "Remove",
   "session.queue.reorder": "Reorder queued prompt",
-  "session.queue.attachments.one": "Plus {{count}} attachment",
-  "session.queue.attachments.other": "Plus {{count}} attachments",
+  "session.queue.attachments.one": "{{count}} attachment",
+  "session.queue.attachments.other": "{{count}} attachments",
   "session.timeline.working": "Working",
   "session.timeline.notice.finished": "{{actor}} finished",
   "session.timeline.notice.failed": "{{actor}} failed",
@@ -1226,6 +1227,10 @@ export const dict = {
   "settings.updates.action.checkNow": "Check now",
   "settings.updates.action.checking": "Checking…",
   "settings.updates.action.downloading": "Downloading…",
+  "settings.updates.action.download": "Download OpenCode",
+  "settings.updates.migration.title": "Move from Beta to Stable",
+  "settings.updates.migration.description":
+    "For now, OpenCode Beta is moving to OpenCode Stable. Download version {{version}}, then install OpenCode from the disk image to continue receiving updates.",
   "settings.updates.action.installing": "Installing…",
   "settings.updates.toast.latest.title": "You're up to date",
   "settings.updates.toast.latest.description": "You're running the latest version of OpenCode.",

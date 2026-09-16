@@ -12,7 +12,7 @@ const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${pr
 type InboxRow = {
   id: string
   sessionID: string
-  timeCreated: number
+  time: { created: number }
   type: "user"
   payload: { text: string; metadata?: Record<string, unknown> }
   delivery: "steer" | "queue"
@@ -22,7 +22,7 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
   const rows: InboxRow[] = seed.map((text, index) => ({
     id: `inb_seed_${index + 1}`,
     sessionID,
-    timeCreated: 1700000000000 + index,
+    time: { created: 1700000000000 + index },
     type: "user",
     payload: { text },
     delivery: "queue",
@@ -59,7 +59,7 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
       const row: InboxRow = {
         id: typeof input.body.id === "string" ? input.body.id : `inb_mock_${sequence}`,
         sessionID: input.sessionID,
-        timeCreated: Date.now(),
+        time: { created: Date.now() },
         type: "user",
         payload: {
           text: typeof input.body.text === "string" ? input.body.text : "",
@@ -74,7 +74,7 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
         item: { type: "user", payload: row.payload, delivery: row.delivery },
       })
     },
-    onInboxChange: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" }) => {
+    onInboxChange: (input: { sessionID: string; inboxID: string; action: "cancel" | "steer" | "queue" }) => {
       changes.push({ inboxID: input.inboxID, action: input.action })
       log.push(`${input.action}:${input.inboxID}`)
       const index = rows.findIndex((row) => row.id === input.inboxID)
@@ -85,11 +85,11 @@ function createQueueMock(seed: string[], messages: SessionMessageInfo[] = []) {
         emit("session.inbox.cancelled", { sessionID: input.sessionID, inboxID: input.inboxID })
         return
       }
-      row.delivery = "steer"
+      row.delivery = input.action
       emit("session.inbox.delivery.changed", {
         sessionID: input.sessionID,
         inboxID: input.inboxID,
-        delivery: "steer",
+        delivery: input.action,
       })
     },
   }

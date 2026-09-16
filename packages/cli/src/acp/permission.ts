@@ -55,7 +55,7 @@ export async function replyPermission(input: {
   await input.client.permission.reply({
     sessionID: input.sessionID,
     requestID: input.event.data.id,
-    reply,
+    decision: reply,
   })
 }
 
@@ -78,7 +78,7 @@ export async function syncEditedFiles(input: {
   const files = Array.isArray(input.metadata.files)
     ? input.metadata.files.flatMap((file): string[] => {
         if (!file || typeof file !== "object") return []
-        const path = Reflect.get(file, "file")
+        const path = "file" in file ? file.file : undefined
         return typeof path === "string" ? [path] : []
       })
     : []

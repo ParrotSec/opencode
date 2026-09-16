@@ -95,7 +95,6 @@ export const Info = Schema.Struct({
   ).annotate({ description: "Scrolling behavior" }),
   attention: Schema.optional(
     Schema.Struct({
-      enabled: Schema.optional(Schema.Boolean).annotate({ description: "Enable attention alerts" }),
       notifications: Schema.optional(Schema.Boolean).annotate({ description: "Show system notifications" }),
       sound: Schema.optional(Schema.Boolean).annotate({ description: "Play attention sounds" }),
       volume: Schema.optional(
@@ -148,7 +147,6 @@ export const Info = Schema.Struct({
       sidebar: Schema.optional(Schema.Literals(["auto", "hide"])).annotate({
         description: "Session sidebar visibility; 'auto' shows it when space permits",
       }),
-      terminal: Schema.optional(Schema.Boolean).annotate({ description: "Enable persistent session terminal panes" }),
       scrollbar: Schema.optional(Schema.Boolean).annotate({ description: "Show the session transcript scrollbar" }),
       thinking: Schema.optional(Schema.Literals(["show", "hide"])).annotate({
         description: "Show or hide model reasoning by default",
@@ -243,7 +241,6 @@ export type Info = Schema.Schema.Type<typeof Info>
 
 export type Resolved = Omit<Info, "attention" | "cursor" | "keybinds" | "leader" | "mouse" | "session" | "tabs"> & {
   attention: {
-    enabled: boolean
     notifications: boolean
     sound: boolean
     volume: number
@@ -260,6 +257,7 @@ export type Resolved = Omit<Info, "attention" | "cursor" | "keybinds" | "leader"
   session: Omit<NonNullable<Info["session"]>, "new_location" | "permissions" | "tps"> & {
     new_location: "launch" | "inherit"
     permissions: "prompt" | "autoaccept"
+    terminal: boolean
     tps: boolean
   }
   tabs: {
@@ -285,9 +283,8 @@ export function resolve(input: Info, options: { terminalSuspend: boolean }): Res
   return {
     ...input,
     attention: {
-      enabled: input.attention?.enabled ?? false,
-      notifications: input.attention?.notifications ?? true,
-      sound: input.attention?.sound ?? true,
+      notifications: input.attention?.notifications ?? false,
+      sound: input.attention?.sound ?? false,
       volume: input.attention?.volume ?? 0.4,
       sound_pack: input.attention?.sound_pack ?? "opencode.default",
       sounds: input.attention?.sounds ?? {},
@@ -308,7 +305,7 @@ export function resolve(input: Info, options: { terminalSuspend: boolean }): Res
       new_location: input.session?.new_location ?? "launch",
       permissions: input.session?.permissions ?? "prompt",
       // Persistent terminal panes need the opencode-pty daemon, which does not ship Windows binaries.
-      terminal: input.session?.terminal ?? process.platform !== "win32",
+      terminal: process.platform !== "win32",
       tps: input.session?.tps ?? true,
     },
     tabs: {
