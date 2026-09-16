@@ -15,9 +15,11 @@
 #      `bun run script/build.ts --single --skip-install` in packages/cli
 #      (upstream 2.x monorepo layout; the web UI is embedded by default).
 #
-# Everything (Bun, deps, models.dev catalog) is fetched from the network at
+# The Bun toolchain and the npm dependencies are fetched from the network at
 # build time: this package REQUIRES a network-enabled build worker and will
-# not build on an offline buildd.
+# not build on an offline buildd. (Upstream 2.x no longer fetches the
+# models.dev catalog at build time; it ships as a committed snapshot in
+# packages/core/src/models-dev/snapshot.txt and is refreshed at runtime.)
 #
 # Build and embed the web UI so the desktop launcher can start `opencode serve`
 # (the `web` command was replaced by `serve` in upstream 2.x).
@@ -86,9 +88,10 @@ override_dh_auto_build:
 	set -e; \
 	mkdir -p $(CURDIR)/debian/fakehome; \
 	export PATH="$(BUN_HOME)/bun:$$PATH"; \
-	echo "==> bun install (deps pinned by bun.lock; lifecycle scripts skipped:"; \
+	echo "==> bun install --frozen-lockfile (deps pinned by bun.lock; fail"; \
+	echo "    loudly if the lockfile ever drifts; lifecycle scripts skipped:"; \
 	echo "    native modules ship prebuilt binaries and need no node-gyp)"; \
-	bun install --ignore-scripts; \
+	bun install --frozen-lockfile --ignore-scripts; \
 	echo "==> building $(DIST_NAME) (single target with embedded web UI)"; \
 	cd packages/cli; \
 	OPENCODE_VERSION=$(UPSTREAM_VERSION) \

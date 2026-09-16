@@ -7,3 +7,6 @@ tar-ignore = "dist"
 # sbuild HOME redirect scratch dir (created during build).
 extend-diff-ignore = "(^|/)debian/fakehome(/|$)"
 tar-ignore = "debian/fakehome"
+# Upstream build output (embedded web UI vite build + compiled CLI) if a
+# binary build already ran in this tree.
+extend-diff-ignore = "packages/(app|cli)/dist(/|$)"

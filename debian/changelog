@@ -1,3 +1,9 @@
+opencode (2.0.3-0parrot3) echo; urgency=medium
+
+  * Rebuild package.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 16 Sep 2026 15:01:02 +0200
+
 opencode (2.0.3-0parrot2) echo; urgency=medium
 
   * Fix the build for the upstream 2.x monorepo layout: the CLI package
@@ -21,6 +27,27 @@ opencode (2.0.3-0parrot2) echo; urgency=medium
   * Clean the packages/cli and packages/app dist directories built by
     the new build (the web UI is now always embedded by upstream's
     build script).
+  * Fix debian/watch: uscan has no @VERSION@ substitution variable, so
+    the filenamemangle saved downloads as opencode-@VERSION@.tar.gz
+    (worked around manually with a symlink). Capture the version with
+    @ANY_VERSION@ and re-insert it with $1, and make the mangle produce
+    the canonical orig-tarball name opencode_<version>.orig.tar.gz
+    directly.
+  * Install npm dependencies with bun install --frozen-lockfile so the
+    build fails loudly if the upstream lockfile ever drifts out of sync
+    instead of silently re-resolving versions (the failed 0parrot1 build
+    re-resolved 520 packages and rewrote bun.lock under the old Bun pin).
+  * Move xdg-utils from Depends to Suggests: upstream 2.x no longer
+    opens the browser itself (`opencode serve` prints the server URL;
+    the user opens it in the browser of their choice).
+  * The models.dev provider catalog is no longer fetched from the
+    network at build time (upstream 2.x ships it as a committed snapshot
+    in the source; the program refreshes it at runtime): update the
+    debian/rules comments and the package description accordingly.
+  * Ignore the packages/app and packages/cli dist directories (embedded
+    web UI and compiled CLI build output) in debian/source/options when
+    regenerating the source package from a tree that already ran a
+    binary build.
  -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 15 Sep 2026 16:45:00 +0200
 
 opencode (2.0.3-0parrot1) echo; urgency=medium

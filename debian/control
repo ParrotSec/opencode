@@ -11,8 +11,8 @@ Vcs-Git: https://github.com/anomalyco/opencode.git
 
 Package: opencode
 Architecture: amd64 arm64
-Depends: ${misc:Depends}, ${shlibs:Depends}, xdg-utils
-Suggests: git
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Suggests: git, xdg-utils
 Description: open source AI coding agent for the terminal
  opencode is an open-source AI coding agent. It provides an interactive
  terminal UI (TUI), a headless server, and a scriptable CLI that can read,
@@ -25,12 +25,14 @@ Description: open source AI coding agent for the terminal
  .
  The package includes the embedded web UI. The desktop launcher starts
  `opencode serve` (the `web` command was renamed upstream), which runs the
- local API and web server so the UI can be reached from the browser. The
- interactive terminal UI and all other commands remain available by running
- `opencode` from a terminal.
+ local API and web server and prints its URL so the UI can be opened in
+ the browser. The interactive terminal UI and all other commands remain
+ available by running `opencode` from a terminal.
  .
  Build note: opencode is built from source with Bun (not packaged in
- Debian). The Bun toolchain, the npm dependencies (pinned by the upstream
- bun.lock) and the models.dev provider catalog used during code generation
- are all fetched from the network at build time, so the build requires a
- network-enabled build worker and will not run on an offline buildd.
+ Debian). The Bun toolchain and the npm dependencies (pinned by the
+ upstream bun.lock) are fetched from the network at build time, so the
+ build requires a network-enabled build worker and will not run on an
+ offline buildd. The models.dev provider catalog is no longer fetched
+ at build time (upstream 2.x ships it as a committed snapshot in the
+ source; the program refreshes it at runtime).
