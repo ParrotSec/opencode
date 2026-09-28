@@ -83,6 +83,34 @@ test("config.get returns ordered config entries for a location", async () => {
   expect(request?.url).toBe("http://localhost:3000/api/config?location%5Bdirectory%5D=%2Ftmp%2Fproject")
 })
 
+test("requests keep a path prefix on baseUrl", async () => {
+  let request: Request | undefined
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:8888/ws/abc",
+    fetch: async (input) => {
+      request = input instanceof Request ? input : new Request(input)
+      return Response.json({ version: "2.0.0", pid: 1, urls: [], paths: { tmp: "/tmp" } })
+    },
+  })
+
+  await client.server.info()
+  expect(request?.url).toBe("http://localhost:8888/ws/abc/api/info")
+})
+
+test("requests join against the base URL pathname", async () => {
+  let request: Request | undefined
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:8888/ws/abc?tenant=one#fragment",
+    fetch: async (input) => {
+      request = input instanceof Request ? input : new Request(input)
+      return Response.json({ version: "2.0.0", pid: 1, urls: [], paths: { tmp: "/tmp" } })
+    },
+  })
+
+  await client.server.info()
+  expect(request?.url).toBe("http://localhost:8888/ws/abc/api/info")
+})
+
 test("vcs.base and committed diffs preserve location and explicit base on the wire", async () => {
   const requests: Request[] = []
   const location = { directory: "/repo", project: { id: "global", directory: "/repo", canonical: "/repo" } }
@@ -121,6 +149,67 @@ test("vcs.diff exposes unavailable comparisons as errors, not empty diffs", asyn
     service: "vcs",
     message: "No review base available",
   })
+})
+
+test("declared errors are thrown as Error instances that keep the body", async () => {
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async () =>
+      Response.json(
+        { _tag: "InvalidRequestError", message: "Incompatible auth server", kind: "integration_authorization" },
+        { status: 400 },
+      ),
+  })
+  const error = await client.integration.oauth
+    .connect({ integrationID: "mcp_test", methodID: "oauth", location: { directory: "/repo" } })
+    .then(
+      () => undefined,
+      (cause: unknown) => cause,
+    )
+  expect(error).toBeInstanceOf(Error)
+  if (!(error instanceof Error)) throw error
+  expect(error.message).toBe("Incompatible auth server")
+  expect(error.name).toBe("InvalidRequestError")
+  expect(error.stack).toContain("InvalidRequestError: Incompatible auth server")
+  expect(error).toMatchObject({ _tag: "InvalidRequestError", kind: "integration_authorization" })
+})
+
+test("declared errors with a data envelope read the nested message", async () => {
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async () =>
+      Response.json({ name: "WorktreeError", data: { message: "Worktree directory unavailable" } }, { status: 400 }),
+  })
+  const error = await client.worktree.create({ projectID: "prj_test" }).then(
+    () => undefined,
+    (cause: unknown) => cause,
+  )
+  expect(error).toBeInstanceOf(Error)
+  if (!(error instanceof Error)) throw error
+  expect(error.message).toBe("Worktree directory unavailable")
+  expect(error.name).toBe("WorktreeError")
+  expect(error).toMatchObject({ name: "WorktreeError", data: { message: "Worktree directory unavailable" } })
+})
+
+test("client errors keep the reason and describe the failure in the message", async () => {
+  const failure = (fetch: () => Promise<Response>) =>
+    OpenCode.make({ baseUrl: "http://localhost:3000", fetch })
+      .session.list()
+      .catch((cause: unknown) => cause)
+  expect(await failure(() => Promise.reject(new TypeError("Unable to connect")))).toMatchObject({
+    reason: "Transport",
+    message: "Transport: Unable to connect",
+  })
+  expect(await failure(async () => new Response("", { status: 500 }))).toMatchObject({
+    reason: "UnexpectedStatus",
+    message: "UnexpectedStatus: 500",
+  })
+  expect(await failure(async () => new Response("<html>", { headers: { "content-type": "text/html" } }))).toMatchObject(
+    {
+      reason: "UnsupportedContentType",
+      message: "UnsupportedContentType: text/html",
+    },
+  )
 })
 
 test("project.update uses the global project contract", async () => {
@@ -192,19 +281,29 @@ test("websearch.query uses the public HTTP contract", async () => {
   expect(await request?.json()).toEqual({ query: "opencode", providerID: "exa" })
 })
 
-test("server.status uses the public HTTP contract", async () => {
+test("server.info uses the public HTTP contract", async () => {
   let request: Request | undefined
   const client = OpenCode.make({
     baseUrl: "http://localhost:3000",
     fetch: async (input) => {
       request = input instanceof Request ? input : new Request(input)
-      return Response.json({ version: "2.0.0", pid: 1, urls: ["http://192.168.1.10:4096"] })
+      return Response.json({
+        version: "2.0.0",
+        pid: 1,
+        urls: ["http://192.168.1.10:4096"],
+        paths: { tmp: "/tmp/opencode" },
+      })
     },
   })
 
-  expect(await client.server.status()).toEqual({ version: "2.0.0", pid: 1, urls: ["http://192.168.1.10:4096"] })
+  expect(await client.server.info()).toEqual({
+    version: "2.0.0",
+    pid: 1,
+    urls: ["http://192.168.1.10:4096"],
+    paths: { tmp: "/tmp/opencode" },
+  })
   expect(request?.method).toBe("GET")
-  expect(request?.url).toBe("http://localhost:3000/api/status")
+  expect(request?.url).toBe("http://localhost:3000/api/info")
 })
 
 test("experimental wellknown integration add uses the public HTTP contract", async () => {
@@ -686,7 +785,7 @@ test("event.subscribe reports heartbeat comments as stream activity", async () =
 })
 
 // Moved from packages/app/e2e/regression/session-timeline-transport.spec.ts
-test("event transport passes through ordinary status requests", async () => {
+test("event transport passes through ordinary info requests", async () => {
   const requests: string[] = []
   const event = { id: "evt_connected", created: 1, type: "server.connected", data: {} }
   const client = OpenCode.make({
@@ -699,16 +798,22 @@ test("event transport passes through ordinary status requests", async () => {
           headers: { "content-type": "text/event-stream" },
         })
       }
-      return Response.json({ version: "2.0.0", pid: 1, urls: ["http://localhost:3000"] })
+      return Response.json({
+        version: "2.0.0",
+        pid: 1,
+        urls: ["http://localhost:3000"],
+        paths: { tmp: "/tmp/opencode" },
+      })
     },
   })
   await expect(client.event.subscribe()[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: event })
-  await expect(client.server.status()).resolves.toEqual({
+  await expect(client.server.info()).resolves.toEqual({
     version: "2.0.0",
     pid: 1,
     urls: ["http://localhost:3000"],
+    paths: { tmp: "/tmp/opencode" },
   })
-  expect(requests).toEqual(["/api/event", "/api/status"])
+  expect(requests).toEqual(["/api/event", "/api/info"])
 })
 
 test("event.subscribe terminates on malformed Promise SSE data", async () => {

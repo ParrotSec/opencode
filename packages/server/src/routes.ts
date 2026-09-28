@@ -42,6 +42,7 @@ import { handlers } from "./handlers"
 import { authorizationLayer } from "./middleware/authorization"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { PtyEnvironment } from "./pty-environment"
+import { ServerPairing } from "./pairing"
 import { layer } from "./location"
 import { formLocationLayer } from "./middleware/form-location"
 import { sessionLocationLayer } from "./middleware/session-location"
@@ -68,6 +69,7 @@ const applicationServiceNodes = [
   Credential.node,
   WellKnown.node,
   PtyEnvironment.node,
+  ServerPairing.node,
   LocationServiceMap.node,
   LocationActivity.node,
   SessionRestart.node,
@@ -169,7 +171,7 @@ function makeRoutes<AuthError, AuthServices>(
             WellKnown.Service,
           )(context),
         ),
-        ServerInfo.layer(serviceURLs, options.app),
+        ServerInfo.layer(serviceURLs, Context.get(context, Global.Service).tmp, options.app),
       )
       const api = HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
         Layer.provide(handlers.pipe(Layer.provide(services), Layer.provide(Layer.succeed(CorsConfig, options)))),
