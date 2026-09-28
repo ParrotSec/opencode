@@ -1,0 +1,35 @@
+#!/bin/sh
+# OpenCode Web launcher: start the OpenCode API + web server (`opencode
+# serve`), print the complete login and open the web UI in the default
+# browser automatically. Stop the server with Ctrl+C.
+#
+# At startup the server prints its URL ("server listening on <url>") and a
+# generated session password ("server password <password>"); the login
+# username is always "opencode" (hardcoded upstream). This wrapper repeats
+# both as a complete highlighted login and hands the URL to xdg-open so
+# the browser opens without copy-pasting. If xdg-open is unavailable the
+# URL is printed for manual use.
+
+unset BUN_BE_BUN
+
+opened=0
+
+/usr/lib/opencode/opencode serve 2>&1 | while IFS= read -r line; do
+	printf '%s\n' "$line"
+	case $line in
+	"server listening on "*)
+		if [ "$opened" -ne 1 ]; then
+			opened=1
+			url=${line#server listening on }
+			echo ""
+			echo "==> OpenCode web UI: $url"
+			echo "==> login username: opencode"
+			xdg-open "$url" >/dev/null 2>&1 ||
+				echo "==> could not open the browser; open $url by hand"
+		fi
+		;;
+	"server password "*)
+		echo "==> login password: ${line#server password }"
+		;;
+	esac
+done

@@ -1,12 +1,67 @@
+opencode (2.0.18-0parrot2) echo; urgency=medium
+
+  * Rebuild package.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 28 Sep 2026 23:35:39 +0200
+
 opencode (2.0.18-0parrot1) echo; urgency=medium
 
-  * New upstream version 2.0.18
+  * New upstream version 2.0.18.
+  * Harden the build against silent stalls: run the heartbeat as
+    debian/heartbeat.sh (a plain shell script, directly testable, no
+    make-recipe quoting hazards) and extend it into a stall detector:
+    it tracks the kernel oom_kill counter and, after two consecutive
+    samples without any runnable (R-state) build process, dumps each
+    build process's wait site (kernel wait channel, syscall, RSS) so a
+    hung vite/esbuild/bun step leaves a diagnosable log instead of an
+    empty one. The previous arm64 builds sat with load 0.00 and all
+    build processes idle for ~50 minutes until the inactivity
+    watchdog killed them; the detector will show whether that was a
+    userspace deadlock (futex wait), a dead worker after an OOM kill
+    (pipe wait + oom_kill increment) or a merely slow CPU-bound
+    build (R-state processes at 100% cpu).
+  * Bound the build's network steps: the models.dev catalog refresh
+    now runs under timeout(1) (300s) so a hung fetch cannot stall the
+    build, and the Bun toolchain download uses curl stall detection
+    (--speed-limit 1024 --speed-time 60, retries) instead of running
+    unbounded.
+  * Make the OpenCode Web desktop launcher fully automatic: add an
+    opencode-web wrapper command that starts `opencode serve`, prints
+    the complete login (the username, hardcoded upstream as "opencode",
+    together with the generated session password) and opens the web UI
+    in the default browser with xdg-open, instead of leaving the user
+    to copy-paste the printed URL by hand. The plain serve output only
+    shows the password without the username. xdg-utils moves back from
+    Suggests to Depends: the automatic browser launch is part of the
+    launcher's function on amd64 (unused but harmless on arm64, where
+    the launcher is not installed since the arm64 binaries omit the
+    web UI).
+  * Skip the embedded web UI on arm64: the web UI is produced by a large
+    vite build whose arm64 builds have repeatedly stalled silently on
+    the build workers (see the stall detector above). Pass --skip-web-ui
+    on arm64 and do not install the OpenCode Web desktop launcher there;
+    the binary embeds an empty app archive while the terminal UI, the
+    CLI and the headless `serve` API server remain fully functional.
+    Revisit once the stall detector has identified the arm64 vite stall.
 
  -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 28 Sep 2026 15:28:22 +0200
 
 opencode (2.0.5-0parrot1) echo; urgency=medium
 
   * New upstream version 2.0.5.
+  * Fix the build heartbeat's memory reading: the awk program inside
+    the heartbeat echo contained backslash-escaped double quotes, which
+    the buildd shell passes through literally inside "$( ... )" quoting,
+    so mawk rejected the program ("unexpected character") and every
+    heartbeat reported an empty memory value. Rewrite the awk program
+    quote-free (print int($2/1024) with the MB suffix in the echo text
+    instead) and add a snapshot of the build processes (state, %cpu,
+    command) to every heartbeat: the arm64 build's heartbeats
+    consistently reported load 0.00, which suggests the build sits
+    blocked rather than merely slow, and the process snapshot will tell
+    CPU-bound builds from blocked ones. Verified by running the exact
+    recipe bytes through make with /bin/sh (dash) and mawk, like the
+    buildd does.
   * Refresh the bundled models.dev provider catalog snapshot
     (packages/core/src/models-dev/snapshot.txt) at build time with
     upstream's own update-models-snapshot.ts: the snapshot committed in

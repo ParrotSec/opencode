@@ -27,18 +27,27 @@
 # The binary also refreshes the catalog live at runtime, so a failed
 # refresh only means an older floor, never a stale user experience.
 #
-# Build and embed the web UI so the desktop launcher can start `opencode serve`
-# (the `web` command was replaced by `serve` in upstream 2.x).
-# The terminal TUI and all regular CLI commands remain available through
-# /usr/bin/opencode.
+# Build and embed the web UI (amd64 only) so the desktop launcher can
+# start `opencode serve` (the `web` command was replaced by `serve` in
+# upstream 2.x). The terminal TUI and all regular CLI commands remain
+# available through /usr/bin/opencode on every architecture.
 #
 # The web UI build (a large vite build, then a synchronous brotli-11
 # compression of the archive) and Bun's bytecode compilation are silent for
 # long stretches, which looks like a hung build to inactivity watchdogs on
-# slow (arm64) workers. override_dh_auto_build therefore emits a heartbeat
-# line (with load and memory readings) every 10 minutes while it runs:
-# it keeps the log alive for the watchdog and distinguishes CPU-bound
-# builds from memory-starved ones.
+# slow (arm64) workers. override_dh_auto_build therefore runs
+# debian/heartbeat.sh in the background: it prints load, available memory,
+# the kernel oom_kill delta and a snapshot of the build processes (state,
+# %cpu, command) every 10 minutes, which keeps the log alive for the
+# watchdog. An arm64 build previously sat with load 0.00 and all build
+# processes idle for ~50 minutes until the watchdog killed it, so after two
+# consecutive all-idle samples the heartbeat also dumps each build
+# process's wait site (kernel wait channel, syscall, RSS) to the log,
+# turning a silent hang into a diagnosable one. The heartbeat lives in a
+# plain shell script rather than in this recipe: inline "$( ... )"
+# substitutions inside recipe echoes are quoting hazards on the buildd
+# shell (mawk rejected a backslash-escaped printf once already), while a
+# script file can be tested directly with /bin/sh.
 
 export DH_VERBOSE = 1
 # sbuild sets HOME=/sbuild-nonexistent (unwritable); bun needs a writable HOME
@@ -69,6 +78,24 @@ else
 $(error opencode: unsupported DEB_HOST_ARCH $(DEB_HOST_ARCH))
 endif
 
+# Embedded web UI: the UI is produced by a large vite build whose arm64
+# builds have repeatedly stalled silently on the build workers (all build
+# processes idle for ~50 minutes until the inactivity watchdog killed the
+# build). Skip it on arm64 (--skip-web-ui) and do not install the OpenCode
+# Web desktop launcher there: the binary then embeds an empty app archive,
+# while the terminal UI, the CLI and the headless `serve` API server remain
+# fully functional. Revisit once the heartbeat stall detector has identified
+# the arm64 vite stall.
+ifeq ($(DEB_HOST_ARCH),arm64)
+WEBUI_BUILD_FLAGS := --skip-web-ui
+WEBUI_MODE := skipped
+WEBUI_DESKTOP :=
+else
+WEBUI_BUILD_FLAGS :=
+WEBUI_MODE := embedded
+WEBUI_DESKTOP := debian/opencode-web.desktop
+endif
+
 BUN_HOME := $(CURDIR)/debian/.bun-toolchain
 BUN := $(BUN_HOME)/bun/bun
 
@@ -88,7 +115,8 @@ override_dh_auto_configure:
 	set -e; \
 	echo "==> fetching bun $(BUN_VERSION) for linux-$(BUN_DL_ARCH)"; \
 	mkdir -p "$(BUN_HOME)"; \
-	curl -fSL -o "$(BUN_HOME)/bun.zip" \
+	curl -fSL --retry 3 --speed-limit 1024 --speed-time 60 \
+		-o "$(BUN_HOME)/bun.zip" \
 		"https://github.com/oven-sh/bun/releases/download/bun-v$(BUN_VERSION)/bun-linux-$(BUN_DL_ARCH).zip"; \
 	unzip -q -o "$(BUN_HOME)/bun.zip" -d "$(BUN_HOME)"; \
 	mv "$(BUN_HOME)/bun-linux-$(BUN_DL_ARCH)" "$(BUN_HOME)/bun"; \
@@ -102,22 +130,20 @@ override_dh_auto_build:
 	set -e; \
 	mkdir -p $(CURDIR)/debian/fakehome; \
 	export PATH="$(BUN_HOME)/bun:$$PATH"; \
-	( while :; do sleep 600; \
-		echo "==> [heartbeat] still building (load $$(cut -d' ' -f1-3 /proc/loadavg), mem avail $$(awk '/^MemAvailable/ {printf \"%dMB\", $$2/1024}' /proc/meminfo))"; \
-	  done ) & \
+	sh debian/heartbeat.sh & \
 	HEARTBEAT_PID=$$!; \
 	trap 'kill $$HEARTBEAT_PID 2>/dev/null || true' EXIT; \
-	echo "==> refreshing the bundled models.dev catalog snapshot (best-effort)"; \
-	bun run --cwd packages/core script/update-models-snapshot.ts \
-		|| echo "==> WARNING: models.dev refresh failed; keeping the upstream snapshot"; \
+	echo "==> refreshing the bundled models.dev catalog snapshot (best-effort, 300s timeout)"; \
+	timeout 300 bun run --cwd packages/core script/update-models-snapshot.ts \
+		|| echo "==> WARNING: models.dev refresh failed or timed out; keeping the upstream snapshot"; \
 	echo "==> bun install --frozen-lockfile (deps pinned by bun.lock; fail"; \
 	echo "    loudly if the lockfile ever drifts; lifecycle scripts skipped:"; \
 	echo "    native modules ship prebuilt binaries and need no node-gyp)"; \
 	bun install --frozen-lockfile --ignore-scripts; \
-	echo "==> building $(DIST_NAME) (single target with embedded web UI)"; \
+	echo "==> building $(DIST_NAME) (single target, web UI $(WEBUI_MODE))"; \
 	cd packages/cli; \
 	OPENCODE_VERSION=$(UPSTREAM_VERSION) \
-		bun run script/build.ts --single --skip-install; \
+		bun run script/build.ts --single --skip-install $(WEBUI_BUILD_FLAGS); \
 	kill $$HEARTBEAT_PID 2>/dev/null || true
 
 # ----------------------------------------------------------------------------
@@ -138,8 +164,12 @@ override_dh_auto_install:
 		debian/opencode/usr/lib/opencode/opencode
 	install -D -m 0755 debian/opencode-wrapper \
 		debian/opencode/usr/bin/opencode
+ifneq ($(WEBUI_DESKTOP),)
+	install -D -m 0755 debian/opencode-web \
+		debian/opencode/usr/bin/opencode-web
 	install -D -m 0644 debian/opencode-web.desktop \
 		debian/opencode/usr/share/applications/opencode-web.desktop
+endif
 	install -D -m 0644 debian/opencode-cli.desktop \
 		debian/opencode/usr/share/applications/opencode-cli.desktop
 	install -D -m 0644 packages/desktop/icons/prod/icon.png \

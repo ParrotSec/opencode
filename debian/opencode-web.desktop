@@ -2,9 +2,9 @@
 Type=Application
 Name=OpenCode Web
 GenericName=AI Coding Agent Web Interface
-Comment=Open source AI coding agent web interface
-Exec=opencode serve
-TryExec=opencode
+Comment=Starts the OpenCode web server, prints the login and opens the web UI in the browser
+Exec=opencode-web
+TryExec=opencode-web
 Icon=opencode
 Terminal=true
 Categories=Development;Utility;

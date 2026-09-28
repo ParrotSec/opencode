@@ -11,8 +11,8 @@ Vcs-Git: https://github.com/anomalyco/opencode.git
 
 Package: opencode
 Architecture: amd64 arm64
-Depends: ${misc:Depends}, ${shlibs:Depends}
-Suggests: git, xdg-utils
+Depends: ${misc:Depends}, ${shlibs:Depends}, xdg-utils
+Suggests: git
 Description: open source AI coding agent for the terminal
  opencode is an open-source AI coding agent. It provides an interactive
  terminal UI (TUI), a headless server, and a scriptable CLI that can read,
@@ -23,11 +23,17 @@ Description: open source AI coding agent for the terminal
  self-contained compiled binary (the Bun runtime and all JavaScript
  dependencies are embedded), so it has no Node.js runtime dependency.
  .
- The package includes the embedded web UI. The desktop launcher starts
- `opencode serve` (the `web` command was renamed upstream), which runs the
- local API and web server and prints its URL so the UI can be opened in
- the browser. The interactive terminal UI and all other commands remain
- available by running `opencode` from a terminal.
+ The interactive terminal UI and all other commands remain available by
+ running `opencode` from a terminal, and `opencode serve` (the `web`
+ command was renamed upstream) runs the local API and web server,
+ printing its URL. On amd64 the package includes the embedded web UI and
+ an OpenCode Web desktop launcher (`opencode-web`) that starts the
+ server, prints the complete login (the username is always "opencode";
+ the session password is generated at startup) and opens the web UI in
+ the default browser automatically. On arm64 the web UI is omitted
+ because its large build stalls on the current arm64 build workers; the
+ web launcher is not installed there, and the terminal UI, the CLI and
+ the API server are fully functional on both architectures.
  .
  Build note: opencode is built from source with Bun (not packaged in
  Debian). The Bun toolchain, the npm dependencies (pinned by the upstream
