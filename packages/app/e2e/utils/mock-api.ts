@@ -33,7 +33,7 @@ export class MockBadRequest extends Schema.TaggedError<MockBadRequest>()("MockBa
 }) {}
 
 const Group = HttpApiGroup.make("mock")
-  .add(HttpApiEndpoint.get("status", "/api/status", { success: Json }))
+  .add(HttpApiEndpoint.get("info", "/api/info", { success: Json }))
   .add(
     HttpApiEndpoint.get("event", "/api/event", {
       success: Schema.String.pipe(HttpApiSchema.asText({ contentType: "text/event-stream" })),
@@ -194,6 +194,13 @@ const Group = HttpApiGroup.make("mock")
     HttpApiEndpoint.post("sessionPrompt", "/api/session/:sessionID/prompt", {
       params: SessionParams,
       payload: JsonPayload,
+      success: Json,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("sessionGenerate", "/api/session/:sessionID/generate", {
+      params: SessionParams,
+      payload: Schema.Struct({ prompt: Schema.String }),
       success: Json,
     }),
   )

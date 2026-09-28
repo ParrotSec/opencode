@@ -39,23 +39,37 @@ import type { Vcs } from "@opencode/schema/vcs"
 import type { WebSearch } from "@opencode/schema/websearch"
 import type { Config } from "@opencode/schema/config"
 
-export type ServerStatusOutput = {
+export type ServerInfoOutput = {
   readonly version: string
   readonly pid: number
   readonly urls: ReadonlyArray<string>
+  readonly paths: { readonly tmp: string }
 }
-export type ServerStatusOperation<E = never> = () => Effect.Effect<ServerStatusOutput, E>
+export type ServerInfoOperation<E = never> = () => Effect.Effect<ServerInfoOutput, E>
+
+export type ServerPairOutput = { readonly code: string; readonly expires_in: number }
+export type ServerPairOperation<E = never> = () => Effect.Effect<ServerPairOutput, E>
+
+export type ServerConnectInput = { readonly code: string }
+export type ServerConnectOutput = { readonly token: string }
+export type ServerConnectOperation<E = never> = (input: ServerConnectInput) => Effect.Effect<ServerConnectOutput, E>
 
 export interface ServerApi<E = never> {
-  readonly status: ServerStatusOperation<E>
+  readonly info: ServerInfoOperation<E>
+  readonly pair: ServerPairOperation<E>
+  readonly connect: ServerConnectOperation<E>
 }
 
 export type LocationGetInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
 export type LocationGetOutput = Location.PublicInfo
 export type LocationGetOperation<E = never> = (input?: LocationGetInput) => Effect.Effect<LocationGetOutput, E>
 
+export type LocationReloadOutput = void
+export type LocationReloadOperation<E = never> = () => Effect.Effect<LocationReloadOutput, E>
+
 export interface LocationApi<E = never> {
   readonly get: LocationGetOperation<E>
+  readonly reload: LocationReloadOperation<E>
 }
 
 export type AgentListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
@@ -236,6 +250,7 @@ export type SessionSwitchModelOperation<E = never> = (
 export type SessionUpdateInput = {
   readonly sessionID: Session.ID
   readonly title?: string | undefined
+  readonly metadata?: Session.Metadata | undefined
   readonly permissions?: Permission.Ruleset | undefined
 }
 export type SessionUpdateOutput = void
@@ -510,6 +525,20 @@ export type SessionLogOutput =
               }
             | undefined
           readonly data: { readonly sessionID: Session.ID; readonly title: string }
+        }
+      | {
+          readonly id: Event.ID
+          readonly created: number
+          readonly metadata?: { readonly [x: string]: unknown } | undefined
+          readonly type: "session.metadata.updated"
+          readonly durable: { readonly aggregateID: string; readonly seq: Event.Seq; readonly version: Event.Version }
+          readonly location?:
+            | {
+                readonly directory: AbsolutePath
+                readonly workspaceID?: (string & Brand.Brand<"Workspace.ID">) | undefined
+              }
+            | undefined
+          readonly data: { readonly sessionID: Session.ID; readonly metadata: Session.Metadata }
         }
       | {
           readonly id: Event.ID
@@ -812,6 +841,7 @@ export type SessionLogOutput =
             readonly agent: Agent.ID
             readonly model: Model.Ref
             readonly snapshot?: (string & Brand.Brand<"Snapshot.ID">) | undefined
+            readonly started: number
           }
         }
       | {

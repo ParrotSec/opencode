@@ -111,6 +111,16 @@ export const Renamed = Event.durable({
 })
 export type Renamed = typeof Renamed.Type
 
+export const MetadataUpdated = Event.durable({
+  type: "session.metadata.updated",
+  ...options,
+  schema: {
+    ...Base,
+    metadata: SessionMetadata,
+  },
+})
+export type MetadataUpdated = typeof MetadataUpdated.Type
+
 export const Permissions = Event.durable({
   type: "session.permissions",
   ...options,
@@ -328,6 +338,8 @@ export namespace Step {
       agent: Agent.ID,
       model: Model.Ref,
       snapshot: Snapshot.ID.pipe(optional),
+      /** Request dispatch time, before waiting for provider output. */
+      started: NonNegativeInt,
     },
   })
   export type Started = typeof Started.Type
@@ -646,6 +658,7 @@ export const Definitions = Event.inventory(
   ModelSelected,
   Moved,
   Renamed,
+  MetadataUpdated,
   Permissions,
   Viewed,
   UsageUpdated,

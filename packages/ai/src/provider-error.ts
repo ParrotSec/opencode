@@ -59,7 +59,15 @@ export const isContextOverflowFailure = (failure: unknown) =>
     : Schema.is(ProviderErrorEvent)(failure) && failure.classification === "context-overflow"
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
-const QUOTA_CODES = new Set(["insufficient_quota", "usage_not_included", "billing_error"])
+// OpenCode Zen reports account caps as typed 429/402 errors that are not throttles.
+const QUOTA_CODES = new Set([
+  "insufficient_quota",
+  "usage_not_included",
+  "billing_error",
+  "gousagelimiterror",
+  "freeusagelimiterror",
+  "creditlimitexceeded",
+])
 const AUTH_CODES = new Set(["authentication_error", "permission_error"])
 const SERVER_CODES = new Set([
   "api_error",
@@ -72,12 +80,19 @@ const SERVER_CODES = new Set([
   "slow_down",
   "serviceunavailableexception",
 ])
-const INVALID_REQUEST_CODES = new Set(["invalid_prompt", "invalid_request_error", "validationexception"])
+// `invalid_request` is the Vercel AI Gateway's code for an upstream request rejection.
+const INVALID_REQUEST_CODES = new Set([
+  "invalid_prompt",
+  "invalid_request",
+  "invalid_request_error",
+  "validationexception",
+])
 // Azure OpenAI reports `content_filter` with `innererror.code` ResponsibleAIPolicyViolation.
 // OpenRouter tags provider failures with a typed `error_type`; its Responses skin also
 // emits `image_content_policy_violation` as the native code.
 const CONTENT_POLICY_CODES = new Set([
   "content_filter",
+  "content_moderation",
   "responsibleaipolicyviolation",
   "content_policy_violation",
   "image_content_policy_violation",
@@ -87,7 +102,8 @@ const CONTENT_POLICY_CODES = new Set([
 // as a `[code]` label at the start of the rewritten message.
 const GATEWAY_CODE_LABEL = /^[^:\n]+: \[([A-Za-z0-9_.-]+)\]/
 const RATE_LIMIT_TEXT = /rate increased too quickly|rate[-_\s]?limit|too[_\s]?many[_\s]?requests/i
-const QUOTA_TEXT = /insufficient[-_\s]?quota|quota[-_\s]?exceeded/i
+// Only consulted on 429, where throttles and account caps share a status.
+const QUOTA_TEXT = /insufficient[-_\s]?quota|quota[-_\s]?exceeded|budget exceeded|usage limit/i
 // Policy rejections without a dedicated code, matched against the provider's own
 // explanation only. OpenAI reuses `invalid_prompt` for usage-policy rejections while
 // Bedrock Mantle reuses it for schema validation; Anthropic reports blocked output
@@ -143,7 +159,11 @@ export function classifyProviderFailure(input: ProviderFailure): AIError["reason
     return new InvalidRequestError({ ...details, classification: "payload-too-large" })
   if (codes.some((code) => CONTENT_POLICY_CODES.has(code)) || (clientScoped && CONTENT_POLICY_TEXT.test(input.message)))
     return new ContentPolicyError(details)
-  if (codes.some((code) => QUOTA_CODES.has(code)) || (input.status === 429 && QUOTA_TEXT.test(text)))
+  if (
+    input.status === 402 ||
+    codes.some((code) => QUOTA_CODES.has(code)) ||
+    (input.status === 429 && QUOTA_TEXT.test(text))
+  )
     return new QuotaExceededError(details)
   if (input.status === 401 || input.status === 403 || codes.some((code) => AUTH_CODES.has(code)))
     return new AuthenticationError(details)
@@ -163,10 +183,12 @@ export function classifyProviderFailure(input: ProviderFailure): AIError["reason
     input.status === 408 ||
     input.status === 409 ||
     (input.status !== undefined && input.status >= 500) ||
+    // Server codes and phrasing only decide when no HTTP status contradicts them:
+    // gateways such as OpenCode Zen substitute `server_error` for codes they do
+    // not forward, so a 4xx with a server code is still a rejected request.
     ((input.status === undefined || input.status < 400) &&
-      !codes.some((code) => INVALID_REQUEST_CODES.has(code)) &&
-      SERVER_ERROR_TEXT.test(text)) ||
-    codes.some((code) => SERVER_CODES.has(code) || code.includes("exhausted") || code.includes("unavailable"))
+      ((!codes.some((code) => INVALID_REQUEST_CODES.has(code)) && SERVER_ERROR_TEXT.test(text)) ||
+        codes.some((code) => SERVER_CODES.has(code) || code.includes("exhausted") || code.includes("unavailable"))))
   )
     return new ProviderInternalError({
       ...details,
@@ -189,6 +211,8 @@ function providerCodes(value: unknown) {
   const exception = isRecord(decoded.exception) ? decoded.exception : undefined
   return [
     decoded.code,
+    // Stability's `{ id, name, errors }` bodies carry the code in `name`.
+    Array.isArray(decoded.errors) ? decoded.name : undefined,
     decoded.error_type,
     error?.code,
     error?.type,
