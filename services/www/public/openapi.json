@@ -872,6 +872,22 @@
             "required": false
           },
           {
+            "name": "archived",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
             "name": "directory",
             "in": "query",
             "schema": {
@@ -1317,7 +1333,7 @@
             }
           }
         },
-        "description": "Import a projected session transcript at the requested location. If parentID is supplied, the parent session must already exist; import parents before children.",
+        "description": "Import a projected session transcript at the requested location. Accepts transcripts exported by earlier releases. If parentID is supplied, the parent session must already exist; import parents before children.",
         "summary": "Import session",
         "requestBody": {
           "content": {
@@ -1329,10 +1345,7 @@
                     "$ref": "#/components/schemas/Session.Info"
                   },
                   "messages": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/Session.Message.Info"
-                    }
+                    "type": "array"
                   },
                   "location": {
                     "anyOf": [
@@ -1715,6 +1728,17 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "archived": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Archive the session with true or restore it with false. Repeating the current state is a no-op."
                   }
                 },
                 "additionalProperties": false
@@ -4976,7 +5000,8 @@
                     "skill",
                     "shell",
                     "assistant",
-                    "compaction"
+                    "compaction",
+                    "idle"
                   ]
                 },
                 {
@@ -5349,6 +5374,98 @@
                   }
                 },
                 "required": ["prompt"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/experimental/voice/session": {
+      "post": {
+        "tags": ["voice"],
+        "operationId": "experimental.voice.session",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "VoiceSessionResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "LocationNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationNotFoundErrorEncoded"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Create a server-brokered voice session using the server's configured provider credentials and return the WebRTC SDP answer or WebSocket ephemeral token.",
+        "summary": "Create voice session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "session": {
+                    "anyOf": [
+                      {
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "transport": {
+                    "$ref": "#/components/schemas/VoiceTransportInput"
+                  }
+                },
+                "required": ["model", "transport"],
                 "additionalProperties": false
               }
             }
@@ -8223,6 +8340,122 @@
       }
     },
     "/api/permission/saved/{id}": {
+      "patch": {
+        "tags": ["permission"],
+        "operationId": "permission.saved.update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/PermissionSaved.ID"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PermissionSaved.Info"
+                    }
+                  },
+                  "required": ["data"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PermissionSavedNotFoundError | LocationNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PermissionSavedNotFoundErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LocationNotFoundErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ConflictError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Change the action or resource of a saved permission. Fails with a conflict when the project already has a saved permission with the same action and resource.",
+        "summary": "Update saved permission",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "resource": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      },
       "delete": {
         "tags": ["permission"],
         "operationId": "permission.saved.remove",
@@ -13817,6 +14050,27 @@
           "permissions": {
             "$ref": "#/components/schemas/Permission.Ruleset"
           },
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": ["provider.use", "tool.use", "integration.use"]
+                },
+                "resource": {
+                  "type": "string"
+                },
+                "effect": {
+                  "type": "string",
+                  "enum": ["allow", "deny"]
+                }
+              },
+              "required": ["action", "resource", "effect"],
+              "additionalProperties": false
+            }
+          },
           "agents": {
             "type": "object",
             "additionalProperties": {
@@ -14063,6 +14317,9 @@
               "portable_shell_scanner": {
                 "type": "boolean"
               },
+              "todo": {
+                "type": "boolean"
+              },
               "subagent_depth": {
                 "type": "integer",
                 "minimum": 0
@@ -14142,6 +14399,12 @@
             "items": {
               "type": "string"
             }
+          },
+          "temperature": {
+            "type": "boolean"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/Config.Model.Reasoning"
           }
         },
         "additionalProperties": false
@@ -14185,11 +14448,61 @@
         "required": ["input", "output"],
         "additionalProperties": false
       },
+      "Config.Model.Reasoning": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "supported": {
+                "type": "boolean",
+                "enum": [false]
+              }
+            },
+            "required": ["supported"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "supported": {
+                "type": "boolean",
+                "enum": [true]
+              },
+              "toggle": {
+                "type": "boolean"
+              },
+              "effort": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "budget": {
+                "type": "object",
+                "properties": {
+                  "min": {
+                    "type": "integer"
+                  },
+                  "max": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": ["supported"],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Config.Model.Settings": {
         "type": "object",
         "properties": {
           "compaction": {
             "$ref": "#/components/schemas/Provider.Compaction"
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/Provider.Encoding"
           }
         },
         "allOf": [
@@ -14217,6 +14530,11 @@
           },
           "name": {
             "type": "string"
+          },
+          "releaseDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}(-\\d{2})?$",
+            "description": "Release date as YYYY-MM-DD or YYYY-MM"
           },
           "compatibility": {
             "$ref": "#/components/schemas/Model.Compatibility"
@@ -14369,6 +14687,9 @@
           },
           "transport": {
             "$ref": "#/components/schemas/Provider.Transport"
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/Provider.Encoding"
           }
         },
         "allOf": [
@@ -14402,6 +14723,9 @@
           },
           "package": {
             "type": "string"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/Provider.Compatibility"
           },
           "settings": {
             "$ref": "#/components/schemas/Config.Provider.Settings"
@@ -14691,9 +15015,6 @@
           },
           "metadata": {
             "type": "object"
-          },
-          "configuration": {
-            "$ref": "#/components/schemas/Form.Answer_1"
           }
         },
         "required": ["type", "key"],
@@ -14823,12 +15144,6 @@
         "additionalProperties": false
       },
       "Form.Answer": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/Form.Value"
-        }
-      },
-      "Form.Answer_1": {
         "type": "object",
         "additionalProperties": {
           "$ref": "#/components/schemas/Form.Value"
@@ -16597,6 +16912,10 @@
         "required": ["_tag", "sessionID", "messageID", "message"],
         "additionalProperties": false
       },
+      "Model.CacheFormat": {
+        "type": "string",
+        "enum": ["anthropic", "alibaba"]
+      },
       "Model.Capabilities": {
         "type": "object",
         "properties": {
@@ -16614,6 +16933,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "temperature": {
+            "type": "boolean"
           }
         },
         "required": ["tools", "input", "output"],
@@ -16639,6 +16961,12 @@
           },
           "supportsPromptCacheKey": {
             "type": "boolean"
+          },
+          "streamUsage": {
+            "type": "boolean"
+          },
+          "cacheFormat": {
+            "$ref": "#/components/schemas/Model.CacheFormat"
           },
           "supportsThinkingBlockBinding": {
             "type": "boolean"
@@ -16828,6 +17156,9 @@
         "properties": {
           "compaction": {
             "$ref": "#/components/schemas/Provider.Compaction"
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/Provider.Encoding"
           }
         },
         "allOf": [
@@ -17030,6 +17361,23 @@
           }
         },
         "required": ["id", "projectID", "action", "resource", "time"],
+        "additionalProperties": false
+      },
+      "PermissionSavedNotFoundErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["PermissionSavedNotFoundError"]
+          },
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "id", "message"],
         "additionalProperties": false
       },
       "PersistentPty.CreateInput": {
@@ -17718,6 +18066,40 @@
           }
         ]
       },
+      "Provider.Compatibility": {
+        "type": "object",
+        "properties": {
+          "reasoningField": {
+            "$ref": "#/components/schemas/Model.ReasoningField"
+          },
+          "requireReasoning": {
+            "type": "boolean"
+          },
+          "maxTokensField": {
+            "$ref": "#/components/schemas/Model.MaxTokensField"
+          },
+          "requireFinishReason": {
+            "type": "boolean"
+          },
+          "requireAssistantAfterTool": {
+            "type": "boolean"
+          },
+          "supportsPromptCacheKey": {
+            "type": "boolean"
+          },
+          "streamUsage": {
+            "type": "boolean"
+          },
+          "cacheFormat": {
+            "$ref": "#/components/schemas/Model.CacheFormat"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Provider.Encoding": {
+        "type": "string",
+        "enum": ["zstd", "gzip", "none"]
+      },
       "Provider.ID": {
         "type": "string"
       },
@@ -17742,6 +18124,9 @@
           },
           "package": {
             "type": "string"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/Provider.Compatibility"
           },
           "settings": {
             "$ref": "#/components/schemas/Provider.Settings"
@@ -17819,6 +18204,9 @@
           },
           "transport": {
             "$ref": "#/components/schemas/Provider.Transport"
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/Provider.Encoding"
           }
         },
         "allOf": [
@@ -18579,8 +18967,8 @@
           "rawFinish": {
             "type": "string"
           },
-          "providerState": {
-            "$ref": "#/components/schemas/Session.Message.ProviderState_4"
+          "native": {
+            "$ref": "#/components/schemas/Session.Message.Native_3"
           },
           "cost": {
             "$ref": "#/components/schemas/Money.USD"
@@ -18608,8 +18996,8 @@
           "text": {
             "type": "string"
           },
-          "state": {
-            "$ref": "#/components/schemas/Session.Message.ProviderState_1"
+          "native": {
+            "$ref": "#/components/schemas/Session.Message.Native_1"
           },
           "time": {
             "type": "object",
@@ -18655,8 +19043,8 @@
           "text": {
             "type": "string"
           },
-          "state": {
-            "$ref": "#/components/schemas/Session.Message.ProviderState"
+          "native": {
+            "$ref": "#/components/schemas/Session.Message.Native"
           }
         },
         "required": ["type", "text"],
@@ -18678,11 +19066,8 @@
           "executed": {
             "type": "boolean"
           },
-          "providerState": {
-            "$ref": "#/components/schemas/Session.Message.ProviderState_2"
-          },
-          "providerResultState": {
-            "$ref": "#/components/schemas/Session.Message.ProviderState_3"
+          "native": {
+            "$ref": "#/components/schemas/Session.Message.Native_2"
           },
           "state": {
             "anyOf": [
@@ -18767,17 +19152,11 @@
           "model": {
             "$ref": "#/components/schemas/Model.Ref"
           },
-          "providerState": {
-            "$ref": "#/components/schemas/Session.Message.ProviderState_5"
+          "native": {
+            "$ref": "#/components/schemas/Session.Message.Native_4"
           },
           "summary": {
             "type": "string"
-          },
-          "recent": {
-            "type": "string"
-          },
-          "providerContext": {
-            "$ref": "#/components/schemas/Session.ProviderContext"
           },
           "cost": {
             "$ref": "#/components/schemas/Money.USD"
@@ -18786,7 +19165,7 @@
             "$ref": "#/components/schemas/TokenUsage.Info"
           }
         },
-        "required": ["type", "id", "time", "status", "reason", "summary", "recent"],
+        "required": ["type", "id", "time", "status", "reason", "summary"],
         "additionalProperties": false
       },
       "Session.Message.Compaction.Failed": {
@@ -18866,12 +19245,9 @@
           },
           "summary": {
             "type": "string"
-          },
-          "recent": {
-            "type": "string"
           }
         },
-        "required": ["type", "id", "time", "status", "reason", "summary", "recent"],
+        "required": ["type", "id", "time", "status", "reason", "summary"],
         "additionalProperties": false
       },
       "Session.Message.ID": {
@@ -19041,22 +19417,19 @@
         "required": ["id", "time", "type", "model"],
         "additionalProperties": false
       },
-      "Session.Message.ProviderState": {
+      "Session.Message.Native": {
         "type": "object"
       },
-      "Session.Message.ProviderState_1": {
+      "Session.Message.Native_1": {
         "type": "object"
       },
-      "Session.Message.ProviderState_2": {
+      "Session.Message.Native_2": {
         "type": "object"
       },
-      "Session.Message.ProviderState_3": {
+      "Session.Message.Native_3": {
         "type": "object"
       },
-      "Session.Message.ProviderState_4": {
-        "type": "object"
-      },
-      "Session.Message.ProviderState_5": {
+      "Session.Message.Native_4": {
         "type": "object"
       },
       "Session.Message.Shell": {
@@ -19375,46 +19748,6 @@
       },
       "Session.Metadata": {
         "type": "object"
-      },
-      "Session.ProviderContext": {
-        "type": "object",
-        "properties": {
-          "version": {
-            "type": "number",
-            "enum": [1]
-          },
-          "provenance": {
-            "$ref": "#/components/schemas/Session.ProviderContext.Provenance"
-          },
-          "messages": {}
-        },
-        "required": ["version", "provenance", "messages"],
-        "additionalProperties": false
-      },
-      "Session.ProviderContext.Provenance": {
-        "type": "object",
-        "properties": {
-          "providerID": {
-            "$ref": "#/components/schemas/Provider.ID"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "modelID": {
-            "type": "string"
-          },
-          "route": {
-            "type": "string"
-          },
-          "protocol": {
-            "type": "string"
-          },
-          "endpoint": {
-            "type": "string"
-          }
-        },
-        "required": ["providerID", "provider", "modelID", "route", "protocol", "endpoint"],
-        "additionalProperties": false
       },
       "Session.Revert": {
         "type": "object",
@@ -20192,6 +20525,128 @@
         "required": ["_tag", "providerID", "message"],
         "additionalProperties": false
       },
+      "VoiceSessionResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "transport": {
+                "$ref": "#/components/schemas/VoiceTransport"
+              }
+            },
+            "required": ["transport"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["data"],
+        "additionalProperties": false
+      },
+      "VoiceTransport": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/VoiceWebRTCTransport"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceWebSocketTransport"
+          }
+        ]
+      },
+      "VoiceTransportInput": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/VoiceWebRTCTransportInput"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceWebSocketTransportInput"
+          }
+        ]
+      },
+      "VoiceWebRTCTransport": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["webrtc"]
+          },
+          "sdp": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "sdp"],
+        "additionalProperties": false
+      },
+      "VoiceWebRTCTransportInput": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["webrtc"]
+          },
+          "sdp": {
+            "type": "string"
+          },
+          "dcid": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["Infinity", "-Infinity", "NaN"]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["type", "sdp"],
+        "additionalProperties": false
+      },
+      "VoiceWebSocketTransport": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["websocket"]
+          },
+          "url": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          }
+        },
+        "required": ["type", "url", "token", "expiresAt"],
+        "additionalProperties": false
+      },
+      "VoiceWebSocketTransportInput": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["websocket"]
+          }
+        },
+        "required": ["type"],
+        "additionalProperties": false
+      },
       "WebSearch.ID": {
         "type": "string"
       },
@@ -20384,6 +20839,10 @@
     {
       "name": "generate",
       "description": "Experimental one-shot generation routes."
+    },
+    {
+      "name": "voice",
+      "description": "Experimental server-brokered voice session routes."
     },
     {
       "name": "provider",
