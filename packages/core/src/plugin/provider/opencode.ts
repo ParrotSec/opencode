@@ -1,4 +1,4 @@
-import { Duration, Effect, Equal, Option, Schema, SchemaGetter, Scope, Semaphore, Stream } from "effect"
+import { Duration, Effect, Equal, FiberHandle, Option, Schema, SchemaGetter, Scope, Semaphore, Stream } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode/plugin/effect/integration"
 import { define } from "@opencode/plugin/effect/plugin"
 import type { SessionHttpResponse } from "@opencode/plugin/effect/session"
@@ -11,6 +11,7 @@ import { IntegrationConnection } from "../../integration/connection.js"
 import { ManagedPolicy } from "../../managed-policy.js"
 import { Model } from "../../model.js"
 import { Provider } from "../../provider.js"
+import { Variant } from "../../variant.js"
 import { WebSearch } from "../../websearch.js"
 import { ConfigPolicy } from "@opencode/schema/config/policy"
 import { ConfigProvider } from "@opencode/schema/config/provider"
@@ -20,6 +21,23 @@ import { Money } from "@opencode/schema/money"
 const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
 const methodID = Integration.MethodID.make("device")
+// Drop statements whose action or effect is a value this version does not know, so a newer Console can
+// extend either enum. Malformed statements still fail validation.
+const RemotePolicies = Schema.Array(Schema.Unknown).pipe(
+  Schema.decodeTo(Schema.Unknown, {
+    decode: SchemaGetter.transform((policies) =>
+      policies.filter((policy) => {
+        const action = Schema.decodeUnknownOption(Schema.Struct({ action: Schema.String }))(policy)
+        if (Option.isSome(action) && !Schema.is(ConfigPolicy.Info.fields.action)(action.value.action)) return false
+        const effect = Schema.decodeUnknownOption(Schema.Struct({ effect: Schema.String }))(policy)
+        return Option.isNone(effect) || Schema.is(ConfigPolicy.Effect)(effect.value.effect)
+      }),
+    ),
+    encode: SchemaGetter.passthrough({ strict: false }),
+  }),
+  Schema.decodeTo(Schema.Array(ConfigPolicy.Info)),
+  Schema.optional,
+)
 const RemoteResponse = Schema.Struct({
   providers: Schema.Record(Schema.String, ConfigProvider.Info),
   websearch: Schema.Struct({
@@ -35,22 +53,9 @@ const RemoteResponse = Schema.Struct({
     ),
   }).pipe(Schema.optional),
   // Organization policy compiled for the authenticated caller; omitted when there is none.
-  experimental: Schema.Struct({
-    policies: Schema.Array(Schema.Unknown).pipe(
-      Schema.decodeTo(Schema.Unknown, {
-        // Filter only unsupported actions. Malformed supported statements still fail validation.
-        decode: SchemaGetter.transform((policies) =>
-          policies.filter((policy) => {
-            const action = Schema.decodeUnknownOption(Schema.Struct({ action: Schema.String }))(policy)
-            return Option.isNone(action) || Schema.is(ConfigPolicy.Info.fields.action)(action.value.action)
-          }),
-        ),
-        encode: SchemaGetter.passthrough({ strict: false }),
-      }),
-      Schema.decodeTo(Schema.Array(ConfigPolicy.Info)),
-      Schema.optional,
-    ),
-  }).pipe(Schema.optional),
+  // `experimental.policies` remains accepted alongside top-level `policies`.
+  policies: RemotePolicies,
+  experimental: Schema.Struct({ policies: RemotePolicies }).pipe(Schema.optional),
 })
 const Device = Schema.Struct({
   device_code: Schema.String,
@@ -243,7 +248,10 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Manag
     })
     // Statements ride on the snapshot, so a credential switch, disconnect, or 404 replaces them too.
     const publish = (next: typeof snapshot) =>
-      managed.set({ statements: next.config?.experimental?.policies ?? [], organization: next.organization })
+      managed.set({
+        statements: [...(next.config?.experimental?.policies ?? []), ...(next.config?.policies ?? [])],
+        organization: next.organization,
+      })
 
     yield* ctx.integration.transform((editor) => {
       editor.update("opencode", (integration) => {
@@ -280,6 +288,7 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Manag
             if (config.family !== undefined) model.family = config.family
             if (config.name !== undefined) model.name = config.name
             if (config.modelID !== undefined) model.modelID = config.modelID
+            if (config.releaseDate !== undefined) model.time = { released: Date.parse(config.releaseDate) }
             if (config.compatibility !== undefined)
               model.compatibility = { ...model.compatibility, ...config.compatibility }
             model.package = config.package ?? (item.package !== undefined ? undefined : model.package)
@@ -292,6 +301,15 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Manag
             )
             model.headers = Provider.mergeHeaders(model.headers, config.headers)
             model.body = Provider.mergeOverlay(model.body, config.body)
+            if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
+            // The Console's reasoning replaces the base variants; its variants still overlay them below.
+            if (config.capabilities?.reasoning !== undefined)
+              model.variants = [
+                ...Variant.resolve(
+                  { ...model, package: model.package ?? providers.get(providerID)?.provider.package },
+                  Variant.supports(config.capabilities.reasoning),
+                ),
+              ]
             for (const variant of config.variants ?? []) {
               let existing = model.variants.find((item) => item.id === variant.id)
               if (!existing) {
@@ -315,7 +333,6 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Manag
                 },
               }))
             model.enabled = !config.disabled
-            if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
           })
         }
         const configured = providers.get(providerID)
@@ -467,15 +484,23 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Manag
       )
     })
     yield* guard(snapshot)
-    yield* bus.subscribe(Credential.Event.Switched).pipe(
-      Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
-      Stream.runForEach(refresh),
-      Effect.forkScoped({ startImmediately: true }),
-    )
 
     // Console config can change independently of local credential activity, so re-fetch
     // periodically and only rebuild the catalog and search providers when the snapshot differs.
-    yield* Effect.sleep(Duration.minutes(1)).pipe(Effect.andThen(check()), Effect.forever, Effect.forkScoped)
+    // Only while connected: a signed-out location runs no timer and no credential lookups.
+    const polling = yield* FiberHandle.make<void, never>()
+    const poll = Effect.fnUntraced(function* () {
+      if (!snapshot.connection) return yield* FiberHandle.clear(polling)
+      yield* FiberHandle.run(polling, Effect.sleep(Duration.minutes(1)).pipe(Effect.andThen(check()), Effect.forever), {
+        onlyIfMissing: true,
+      })
+    })
+    yield* bus.subscribe(Credential.Event.Switched).pipe(
+      Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
+      Stream.runForEach(() => refresh().pipe(Effect.andThen(poll()))),
+      Effect.forkScoped({ startImmediately: true }),
+    )
+    yield* poll()
   }),
 })
 

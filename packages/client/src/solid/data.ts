@@ -29,6 +29,7 @@ import type {
   SessionMessageAssistantText,
   SessionMessageAssistantTool,
   SessionInfo,
+  SessionListInput,
   SessionInboxInfo,
   SessionInboxCompaction,
   ShellInfo,
@@ -140,6 +141,27 @@ function locationQuery(ref: LocationRef) {
   return { directory: ref.directory }
 }
 
+function optimisticFiles(files: SessionPromptInput["files"]) {
+  const items = files?.flatMap((file) => {
+    if (!file.uri.startsWith("data:")) return []
+    const comma = file.uri.indexOf(",")
+    if (comma < 0) return []
+    const header = file.uri.slice(5, comma)
+    const parts = header.split(";")
+    if (!parts.slice(1).some((part) => part.toLowerCase() === "base64")) return []
+    const item: NonNullable<Extract<SessionInboxInfo, { type: "user" }>["payload"]["files"]>[number] = {
+      data: file.uri.slice(comma + 1),
+      mime: parts[0] || "application/octet-stream",
+      source: { type: "inline" },
+    }
+    if (file.name !== undefined) item.name = file.name
+    if (file.description !== undefined) item.description = file.description
+    if (file.mention !== undefined) item.mention = { ...file.mention }
+    return [item]
+  })
+  return items?.length ? items : undefined
+}
+
 function formRequestOptions(sessionID: string, ref?: LocationRef) {
   if (sessionID !== "global" || !ref) return undefined
   return {
@@ -203,6 +225,8 @@ function createSync() {
     },
   }
 }
+
+const CHILD_PAGE = 200
 
 export function createData(config: CreateDataInput) {
   const api = config.api
@@ -499,6 +523,16 @@ export function createData(config: CreateDataInput) {
     return created
   }
 
+  // Every direct subagent, not only the server's default first page, so a root's family cost
+  // counts all of them. Pages stay newest first, the order the family index has always used.
+  async function listChildren(input: SessionListInput): Promise<SessionInfo[]> {
+    const page = await api().session.list(input)
+
+    if (page.data.length < CHILD_PAGE || !page.cursor.next) return page.data
+
+    return [...page.data, ...(await listChildren({ cursor: page.cursor.next, limit: CHILD_PAGE }))]
+  }
+
   // Walk parentID upward through loaded session info to the family root. When a
   // parent's info is missing, that missing ID is the furthest-known ancestor and
   // is returned so orphan subtrees group under it until the parent arrives. A
@@ -668,7 +702,8 @@ export function createData(config: CreateDataInput) {
         })
         return
       }
-      case "session.model.selected":
+      case "session.model.selected": {
+        const previous = event.data.previous ?? store.session.info[event.data.sessionID]?.model
         if (store.session.info[event.data.sessionID])
           setStore("session", "info", event.data.sessionID, "model", event.data.model)
         if (!store.session.message[event.data.sessionID]) return
@@ -676,6 +711,7 @@ export function createData(config: CreateDataInput) {
           id: messageIDFromEvent(event.id),
           type: "model-switched",
           model: event.data.model,
+          previous,
           time: { created: event.created },
         })
         refresh(() =>
@@ -690,6 +726,7 @@ export function createData(config: CreateDataInput) {
             }),
         )
         return
+      }
       case "session.renamed": {
         // Preserve the live title when it races the session's initial read.
         refresh(() => {
@@ -706,6 +743,14 @@ export function createData(config: CreateDataInput) {
       case "session.permissions":
         if (store.session.info[event.data.sessionID])
           setStore("session", "info", event.data.sessionID, "permissions", event.data.permissions)
+        return
+      case "session.archived":
+        if (store.session.info[event.data.sessionID])
+          setStore("session", "info", event.data.sessionID, "time", "archived", event.created)
+        return
+      case "session.unarchived":
+        if (store.session.info[event.data.sessionID])
+          setStore("session", "info", event.data.sessionID, "time", "archived", undefined)
         return
       case "session.moved": {
         const current = store.session.info[event.data.sessionID]
@@ -852,7 +897,7 @@ export function createData(config: CreateDataInput) {
             existing.error = undefined
             existing.finish = undefined
             existing.rawFinish = undefined
-            existing.providerState = undefined
+            existing.native = undefined
             existing.time.created = event.data.started
             existing.time.streamed = undefined
             existing.time.completed = undefined
@@ -886,7 +931,7 @@ export function createData(config: CreateDataInput) {
           assistant.time.completed = event.created
           assistant.finish = event.data.finish
           assistant.rawFinish = event.data.rawFinish
-          assistant.providerState = event.data.providerState
+          assistant.native = event.data.native
           assistant.cost = event.data.cost
           assistant.tokens = event.data.tokens
           if (event.data.snapshot) assistant.snapshot = { ...assistant.snapshot, end: event.data.snapshot }
@@ -898,7 +943,7 @@ export function createData(config: CreateDataInput) {
           assistant.time.completed = event.created
           assistant.finish = event.data.finish ?? "error"
           assistant.rawFinish = event.data.rawFinish
-          assistant.providerState = event.data.providerState
+          assistant.native = event.data.native
           assistant.error = event.data.error
           assistant.retry = undefined
           if (event.data.cost !== undefined && event.data.tokens !== undefined) {
@@ -947,7 +992,7 @@ export function createData(config: CreateDataInput) {
         message.editTool(event.data.sessionID, event.data.assistantMessageID, event.data.id, (tool) => {
           tool.time.ran = event.created
           tool.executed = event.data.executed
-          tool.providerState = event.data.state
+          tool.native = event.data.native
           tool.state = { status: "running", input: event.data.input, metadata: {} }
         })
         return
@@ -966,7 +1011,7 @@ export function createData(config: CreateDataInput) {
             content: [...event.data.content],
           }
           tool.executed = event.data.executed || tool.executed === true
-          tool.providerResultState = event.data.resultState
+          if (event.data.native) tool.native = { ...tool.native, ...event.data.native }
           tool.time.completed = event.created
         })
         return
@@ -981,7 +1026,7 @@ export function createData(config: CreateDataInput) {
             content: event.data.content,
           }
           tool.executed = event.data.executed || tool.executed === true
-          tool.providerResultState = event.data.resultState
+          if (event.data.native) tool.native = { ...tool.native, ...event.data.native }
           tool.time.completed = event.created
         })
         return
@@ -990,7 +1035,7 @@ export function createData(config: CreateDataInput) {
           assistant.content.push({
             type: "reasoning",
             text: "",
-            state: event.data.state,
+            native: event.data.native,
             time: { created: event.created },
           })
         })
@@ -1004,7 +1049,7 @@ export function createData(config: CreateDataInput) {
         message.editReasoning(event.data.sessionID, event.data.assistantMessageID, (reasoning) => {
           reasoning.text = event.data.text
           reasoning.time = { created: reasoning.time?.created ?? event.created, completed: event.created }
-          if (event.data.state !== undefined) reasoning.state = event.data.state
+          if (event.data.native !== undefined) reasoning.native = event.data.native
         })
         return
       case "session.retry.scheduled":
@@ -1023,7 +1068,6 @@ export function createData(config: CreateDataInput) {
           status: "running",
           reason: event.data.reason,
           summary: "",
-          recent: event.data.recent ?? "",
           time: { created: event.created },
         })
         if (event.data.inputID) compacting.get(event.data.sessionID)?.observed.add(event.data.inputID)
@@ -1113,10 +1157,8 @@ export function createData(config: CreateDataInput) {
               status: "completed",
               reason: event.data.reason,
               model: event.data.model,
-              providerState: event.data.providerState,
-              providerContext: event.data.providerContext,
+              native: event.data.native,
               summary: event.data.text,
-              recent: event.data.recent,
               cost: event.data.cost,
               tokens: event.data.tokens,
             })
@@ -1128,10 +1170,8 @@ export function createData(config: CreateDataInput) {
             status: "completed",
             reason: event.data.reason,
             model: event.data.model,
-            providerState: event.data.providerState,
-            providerContext: event.data.providerContext,
+            native: event.data.native,
             summary: event.data.text,
-            recent: event.data.recent,
             cost: event.data.cost,
             tokens: event.data.tokens,
             time: { created: event.created },
@@ -1581,6 +1621,13 @@ export function createData(config: CreateDataInput) {
           !messageIndex.get(request.sessionID)?.has(id) &&
           !store.session.pending[request.sessionID]?.some((item) => item.id === id)
         if (fresh) {
+          const files = optimisticFiles(request.files)
+          const payload: Extract<SessionInboxInfo, { type: "user" }>["payload"] = {
+            text: request.text,
+            agents: request.agents?.map((agent) => ({ ...agent })),
+            metadata: request.metadata,
+          }
+          if (files) payload.files = files
           outbox.add(id)
           admitLocal({
             id,
@@ -1588,14 +1635,11 @@ export function createData(config: CreateDataInput) {
             time: { created: Date.now() },
             type: "user",
             delivery: request.delivery ?? "steer",
-            // Files and skills stay off the optimistic row: their durable
+            // File-URI attachments and skills stay off the optimistic row: their durable
             // forms are server-loaded (content, mime, resolution), so they
-            // fill in when the echo upserts the row.
-            payload: {
-              text: request.text,
-              agents: request.agents?.map((agent) => ({ ...agent })),
-              metadata: request.metadata,
-            },
+            // fill in when the echo upserts the row. Inline data URLs already carry
+            // their mime and base64 payload, so they render immediately.
+            payload,
           })
         }
         return sendAdmission(
@@ -1616,11 +1660,7 @@ export function createData(config: CreateDataInput) {
         return sync.run(options?.children ? `session.family:${sessionID}` : `session:${sessionID}`, async () => {
           const [info, children] = await Promise.all([
             api().session.get({ sessionID }),
-            options?.children
-              ? api()
-                  .session.list({ parentID: sessionID, order: "desc" })
-                  .then((response) => response.data)
-              : [],
+            options?.children ? listChildren({ parentID: sessionID, order: "desc", limit: CHILD_PAGE }) : [],
           ])
           const sessions = [info, ...children]
           batch(() => {

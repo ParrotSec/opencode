@@ -608,6 +608,30 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("ignores untyped SSE frames", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {},
+              { type: "response.created", response: { id: "resp_1" } },
+              { type: "response.output_item.added", item: { type: "message", id: "msg_1" } },
+              { type: "response.output_text.delta", item_id: "msg_1", delta: "PO" },
+              { gateway: "keep-alive" },
+              { type: "response.output_text.delta", item_id: "msg_1", delta: "NG" },
+              { type: "response.output_item.done", item: { type: "message", id: "msg_1" } },
+              { type: "response.completed", response: { id: "resp_1" } },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("PONG")
+      expect(response.finishReason?.normalized).toBe("stop")
+    }),
+  )
+
   it.effect("continues a streamed tool call with only the new tool output", () =>
     Effect.forEach([undefined, []], (output) =>
       Effect.gen(function* () {
@@ -2114,6 +2138,24 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(prepared.body).not.toHaveProperty("prompt_cache_key")
+    }),
+  )
+
+  it.effect("omits the prompt cache key when compatibility disables it", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: LanguageModel.update(model, { compatibility: { supportsPromptCacheKey: false } }),
+          prompt: "Hello",
+          promptCacheKey: "request_cache",
+        }),
+      )
+
+      expect(prepared.body).not.toHaveProperty("prompt_cache_key")
+      expect(model.compatibility?.supportsPromptCacheKey).toBeUndefined()
+      expect(
+        (yield* compileRequest(LLM.request({ model, prompt: "Hello", promptCacheKey: "request_cache" }))).body,
+      ).toHaveProperty("prompt_cache_key", "request_cache")
     }),
   )
 
