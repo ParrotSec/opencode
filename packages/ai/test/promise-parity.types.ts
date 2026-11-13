@@ -3,7 +3,8 @@ import type { Client, GenerationHandle } from "../src/index.js"
 import type { Generation, ai } from "../src/effect.js"
 
 // The Promise `ai` mirrors the Effect `ai`: same namespaces, methods, arguments and results. The only allowed differences
-// are `signal` on the options bag, Promise for Effect, AsyncIterable for Stream and GenerationHandle for Generation.
+// are `signal` on the options bag, Promise for Effect, AsyncIterable for Stream (in results and arguments) and
+// GenerationHandle for Generation.
 
 type Equal<A, B> = [A, B] extends [B, A] ? true : false
 type Assert<T extends Record<string, true>> = T
@@ -11,7 +12,7 @@ type Assert<T extends Record<string, true>> = T
 type PromiseAI = Omit<Client, "dispose">
 type EffectAI = typeof ai
 type Helpers = "run" | "bytes" | "base64" | "materialize" | "file" | "write"
-type Namespaces = "image" | "decision" | "experimental"
+type Namespaces = "image" | "decision" | "embedding" | "video" | "experimental"
 
 type Signatures<F> = F extends {
   (...args: infer A1): infer R1
@@ -25,7 +26,10 @@ type Signatures<F> = F extends {
       ? [A, R]
       : never
 
-type Positional<P> = P extends readonly [infer A, ...infer Rest] ? [WithoutSignal<A>, ...Positional<Rest>] : []
+type Positional<P> = P extends readonly [infer A, ...infer Rest]
+  ? [Iterated<WithoutSignal<A>>, ...Positional<Rest>]
+  : []
+type Iterated<T> = T extends Stream.Stream<infer A, infer _E, infer _R> ? AsyncIterable<A> : T
 // Paired with its keys: an options bag of optional fields is otherwise assignable to `{}` and back.
 type Options<P> = P extends readonly [unknown, ...infer Rest]
   ? Options<Rest>
@@ -45,7 +49,11 @@ type Promised<R> =
         : R
 
 type EffectShape<F> =
-  Signatures<F> extends infer S ? (S extends [infer A, infer R] ? [Positional<A>, Options<A>, Promised<R>] : never) : never
+  Signatures<F> extends infer S
+    ? S extends [infer A, infer R]
+      ? [Positional<A>, Options<A>, Promised<R>]
+      : never
+    : never
 type PromiseShape<F> =
   Signatures<F> extends infer S ? (S extends [infer A, infer R] ? [Positional<A>, Options<A>, R] : never) : never
 
@@ -57,7 +65,9 @@ export type Drift<Promise, Effect> = {
     : "missing in Promise"
 }
 
-type Same<A, B> = [Exclude<A, B> | Exclude<B, A>] extends [never] ? true : { readonly drift: Exclude<A, B> | Exclude<B, A> }
+type Same<A, B> = [Exclude<A, B> | Exclude<B, A>] extends [never]
+  ? true
+  : { readonly drift: Exclude<A, B> | Exclude<B, A> }
 
 export type Checks = [
   Assert<{ handle: Same<keyof GenerationHandle<unknown>, Exclude<keyof Generation<unknown>, "route">> }>,
@@ -66,7 +76,8 @@ export type Checks = [
   Assert<Drift<Omit<PromiseAI, Helpers | Namespaces>, Omit<EffectAI, Namespaces>>>,
   Assert<Drift<PromiseAI["image"], EffectAI["image"]>>,
   Assert<Drift<PromiseAI["decision"], EffectAI["decision"]>>,
+  Assert<Drift<PromiseAI["embedding"], EffectAI["embedding"]>>,
+  Assert<Drift<PromiseAI["video"], EffectAI["video"]>>,
   Assert<Drift<PromiseAI["experimental"]["speech"], EffectAI["experimental"]["speech"]>>,
   Assert<Drift<PromiseAI["experimental"]["transcription"], EffectAI["experimental"]["transcription"]>>,
-  Assert<Drift<PromiseAI["experimental"]["video"], EffectAI["experimental"]["video"]>>,
 ]
