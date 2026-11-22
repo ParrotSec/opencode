@@ -1,3 +1,9 @@
+opencode (2.3.2-0parrot1) echo; urgency=medium
+
+  * New upstream version 2.3.2
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Sun, 22 Nov 2026 17:04:32 +0100
+
 opencode (2.3.0-0parrot1) echo; urgency=medium
 
   * New upstream version 2.3.0
